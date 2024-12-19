@@ -1,10 +1,7 @@
 # app/vector_store/utils/firestore_ops.py
-
-"""
-Firestoreのデータ操作を管理するモジュール。
-データベースの作成、確認、メタデータの保存、取得、更新などの操作を提供する。
-"""
 from google.cloud import firestore
+from google.cloud.firestore_admin_v1 import FirestoreAdminClient
+from google.cloud.firestore_admin_v1.types import Database
 from google.api_core.exceptions import GoogleAPIError, PermissionDenied, NotFound
 from datetime import datetime
 from typing import Dict, Any, List, Optional
@@ -25,6 +22,7 @@ class FirestoreManager:
         self.project_id = project_id
         self.database_id = database_id
         self.region = REGION
+        self.admin_client = FirestoreAdminClient()
         self._initialize_client()
 
     def _initialize_client(self) -> None:
@@ -54,10 +52,8 @@ class FirestoreManager:
             bool: データベースが存在する場合はTrue
         """
         try:
-            client = firestore.Client(project=self.project_id)
-            databases = client._admin_client.list_databases(
-                request={"parent": f"projects/{self.project_id}/locations/{self.region}"}
-            )
+            parent = f"projects/{self.project_id}/locations/{self.region}"
+            databases = self.admin_client.list_databases(parent=parent)
             return any(db.name.endswith(f"/databases/{self.database_id}") for db in databases)
         except Exception as e:
             logger.error(f"データベース存在確認エラー: {str(e)}")
@@ -70,13 +66,14 @@ class FirestoreManager:
             GoogleAPIError: データベース作成に失敗した場合
         """
         try:
-            client = firestore.Client(project=self.project_id)
-            operation = client._admin_client.create_database(
-                request={
-                    "parent": f"projects/{self.project_id}/locations/{self.region}",
-                    "database_id": self.database_id,
-                    "type": "FIRESTORE_NATIVE"
-                }
+            parent = f"projects/{self.project_id}/locations/{self.region}"
+            database = Database()
+            database.type_ = Database.DatabaseType.FIRESTORE_NATIVE
+
+            operation = self.admin_client.create_database(
+                parent=parent,
+                database=database,
+                database_id=self.database_id
             )
             # 作成完了を待機
             operation.result()

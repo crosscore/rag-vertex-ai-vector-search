@@ -1,4 +1,4 @@
-# rag_system/vector_store/utils/firestore_ops.py
+# app/vector_store/utils/firestore_ops.py
 
 """
 Firestoreのデータ操作を管理するモジュール。

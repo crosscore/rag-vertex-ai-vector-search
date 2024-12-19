@@ -1,4 +1,4 @@
-# rag_system/common/utils/vector_search.py
+# app/common/utils/vector_search.py
 
 """
 Vector Search操作の基本機能を提供するモジュール。

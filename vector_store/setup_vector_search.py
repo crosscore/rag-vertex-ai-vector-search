@@ -1,4 +1,4 @@
-# rag_system/vector_store/setup_vector_search.py
+# app/vector_store/setup_vector_search.py
 
 """
 Vector Store設定の実行を担当するメインモジュール。

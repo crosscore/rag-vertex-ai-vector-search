@@ -1,4 +1,4 @@
-# rag_system/common/utils/embeddings.py
+# app/common/utils/embeddings.py
 
 """
 テキストのembedding生成を担当するモジュール。

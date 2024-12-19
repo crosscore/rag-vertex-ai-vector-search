@@ -1,4 +1,4 @@
-# rag_system/vector_store/utils/index_manager.py
+# app/vector_store/utils/index_manager.py
 
 """
 Vector Search インデックスの管理を担当するモジュール。

@@ -1,4 +1,4 @@
-# rag_system/common/config.py
+# app/common/config.py
 
 """
 RAGシステムの共通設定値を管理するモジュール。

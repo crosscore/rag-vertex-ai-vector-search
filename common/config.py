@@ -19,7 +19,6 @@ EMBEDDING_MODEL = "text-multilingual-embedding-002"
 
 # Storage settings
 DATASET_ID = "test_dataset"
-GS_METADATA = "gs://tak-test-metadata-001/metadata"
 FIRESTORE_COLLECTION = "table_metadata"
 
 # Index configuration

@@ -17,9 +17,11 @@ DEPLOYED_INDEX_ID = "table_metadata_index_deployed"
 # Model settings
 EMBEDDING_MODEL = "text-multilingual-embedding-002"
 
-# Storage settings
-DATASET_ID = "test_dataset"
+# Firestore settings
 FIRESTORE_COLLECTION = "table_metadata"
+
+# BigQuery settings
+DATASET_ID = "test_dataset"
 
 # Index configuration
 INDEX_CONFIG = {

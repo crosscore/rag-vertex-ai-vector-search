@@ -1,10 +1,8 @@
 # app/common/config.py
-
 """
 RAGシステムの共通設定値を管理するモジュール。
 プロジェクトID、リージョン、モデル名などの基本設定。
 """
-
 # Google Cloud Project settings
 PROJECT_ID = "business-test-001"
 REGION = "asia-northeast1"
@@ -18,6 +16,7 @@ DEPLOYED_INDEX_ID = "table_metadata_index_deployed"
 EMBEDDING_MODEL = "text-multilingual-embedding-002"
 
 # Firestore settings
+FIRESTORE_DATABASE_ID = "test-database-001"
 FIRESTORE_COLLECTION = "table_metadata"
 
 # BigQuery settings

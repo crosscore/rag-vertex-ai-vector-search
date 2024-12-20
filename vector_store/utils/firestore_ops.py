@@ -2,25 +2,25 @@
 from google.cloud import firestore
 from google.cloud.firestore_admin_v1 import FirestoreAdminClient
 from google.cloud.firestore_admin_v1.types import Database
-from google.api_core.exceptions import GoogleAPIError, PermissionDenied, NotFound
+from google.api_core.exceptions import GoogleAPIError
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 import logging
-from ...common.config import PROJECT_ID, REGION
+from ...common.config import PROJECT_ID, REGION, FIRESTORE_DATABASE_ID
 
 logger = logging.getLogger(__name__)
 
 class FirestoreManager:
     """Firestoreデータ操作を管理するクラス"""
 
-    def __init__(self, project_id: str = PROJECT_ID, database_id: str = "database-test-001"):
+    def __init__(self):
         """
         Args:
             project_id: Google CloudプロジェクトID
             database_id: 使用するデータベースID
         """
-        self.project_id = project_id
-        self.database_id = database_id
+        self.project_id = PROJECT_ID
+        self.database_id = FIRESTORE_DATABASE_ID
         self.region = REGION
         self.admin_client = FirestoreAdminClient()
         self._initialize_client()

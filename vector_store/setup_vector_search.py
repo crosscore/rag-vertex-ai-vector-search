@@ -6,6 +6,7 @@ Vector Store設定の実行を担当するメインモジュール。
 """
 
 import uuid
+import time
 from typing import List, Dict, Any
 import logging
 from ..common.config import (
@@ -96,15 +97,19 @@ class VectorStoreSetup:
         Raises:
             Exception: セットアップ中にエラーが発生した場合
         """
+        start_time = time.time()
         try:
             logger.info("Vector Search設定を開始")
 
             # テキストの処理
+            process_start = time.time()
             process_result = self.process_texts(texts)
             dimension = process_result['dimension']
+            logger.info(f"テキスト処理時間: {int(time.time() - process_start)}秒")
 
             # インデックスの作成
             logger.info("インデックスの作成を開始")
+            index_start = time.time()
             index_op = self.index_manager.create_index(
                 display_name=INDEX_NAME,
                 dimension=dimension,
@@ -112,18 +117,22 @@ class VectorStoreSetup:
             )
             index_result = self.index_manager.wait_for_operation(index_op)
             logger.info(f"インデックス作成完了: {index_result.name}")
+            logger.info(f"インデックス作成時間: {int(time.time() - index_start)}秒")
 
             # エンドポイントの作成
             logger.info("エンドポイントの作成を開始")
+            endpoint_start = time.time()
             endpoint_op = self.index_manager.create_endpoint(
                 display_name=INDEX_ENDPOINT_ID,
                 description="RAG system vector search endpoint"
             )
             endpoint_result = self.index_manager.wait_for_operation(endpoint_op)
             logger.info(f"エンドポイント作成完了: {endpoint_result.name}")
+            logger.info(f"エンドポイント作成時間: {int(time.time() - endpoint_start)}秒")
 
             # インデックスのデプロイ
             logger.info("インデックスのデプロイを開始")
+            deploy_start = time.time()
             deploy_op = self.index_manager.deploy_index(
                 index_name=index_result.name,
                 endpoint_name=endpoint_result.name,
@@ -136,7 +145,9 @@ class VectorStoreSetup:
                 name=endpoint_result.name
             )
 
+            deploy_time = int(time.time() - deploy_start)
             logger.info("インデックスのデプロイが完了しました")
+            logger.info(f"デプロイ所要時間: {deploy_time}秒")
             logger.info(f"パブリックエンドポイント: {endpoint_info.public_endpoint_domain_name}")
 
             # デプロイされたインデックスの情報をログ出力
@@ -155,13 +166,17 @@ class VectorStoreSetup:
             )
 
             if state['state'] == "DEPLOYED":
+                total_time = int(time.time() - start_time)
                 logger.info("Vector Search設定が正常に完了しました")
+                logger.info(f"総実行時間: {total_time}秒")
             else:
                 logger.error(f"デプロイメントに問題が発生: {state}")
                 raise RuntimeError(f"Deployment failed with state: {state['state']}")
 
         except Exception as e:
+            total_time = int(time.time() - start_time)
             logger.error(f"Vector Search設定エラー: {str(e)}")
+            logger.error(f"エラーまでの実行時間: {total_time}秒")
             raise
 
 def main():

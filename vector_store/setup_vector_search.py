@@ -28,7 +28,7 @@ class VectorStoreSetup:
 
     def __init__(self):
         """必要なマネージャーとクライアントを初期化"""
-        self.firestore_manager = FirestoreManager(PROJECT_ID)
+        self.firestore_manager = FirestoreManager()
         self.index_manager = IndexManager(PROJECT_ID, REGION)
 
     def process_texts(self,

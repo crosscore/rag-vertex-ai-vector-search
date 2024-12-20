@@ -1,7 +1,5 @@
 # app/vector_store/utils/firestore_ops.py
 from google.cloud import firestore
-from google.cloud.firestore_admin_v1 import FirestoreAdminClient
-from google.cloud.firestore_admin_v1.types import Database
 from google.api_core.exceptions import GoogleAPIError
 from datetime import datetime
 from typing import Dict, Any, List, Optional
@@ -22,19 +20,11 @@ class FirestoreManager:
         self.project_id = PROJECT_ID
         self.database_id = FIRESTORE_DATABASE_ID
         self.region = REGION
-        self.admin_client = FirestoreAdminClient()
         self._initialize_client()
 
     def _initialize_client(self) -> None:
-        """Firestoreクライアントを初期化し、必要に応じてデータベースを作成"""
+        """Firestoreクライアントを初期化"""
         try:
-            # データベースが存在するか確認
-            if not self._check_database_exists():
-                logger.info(f"データベース {self.database_id} が存在しません。作成を試みます。")
-                self._create_database()
-                logger.info(f"データベース {self.database_id} の作成が完了しました。")
-
-            # クライアントの初期化
             self.db = firestore.Client(
                 project=self.project_id,
                 database=self.database_id
@@ -43,42 +33,6 @@ class FirestoreManager:
 
         except Exception as e:
             logger.error(f"Firestore初期化エラー: {str(e)}")
-            raise
-
-    def _check_database_exists(self) -> bool:
-        """指定されたデータベースが存在するか確認
-
-        Returns:
-            bool: データベースが存在する場合はTrue
-        """
-        try:
-            parent = f"projects/{self.project_id}/locations/{self.region}"
-            databases = self.admin_client.list_databases(parent=parent)
-            return any(db.name.endswith(f"/databases/{self.database_id}") for db in databases)
-        except Exception as e:
-            logger.error(f"データベース存在確認エラー: {str(e)}")
-            raise
-
-    def _create_database(self) -> None:
-        """新しいデータベースを作成する
-
-        Raises:
-            GoogleAPIError: データベース作成に失敗した場合
-        """
-        try:
-            parent = f"projects/{self.project_id}/locations/{self.region}"
-            database = Database()
-            database.type_ = Database.DatabaseType.FIRESTORE_NATIVE
-
-            operation = self.admin_client.create_database(
-                parent=parent,
-                database=database,
-                database_id=self.database_id
-            )
-            # 作成完了を待機
-            operation.result()
-        except Exception as e:
-            logger.error(f"データベース作成エラー: {str(e)}")
             raise
 
     def save_text_metadata(self,

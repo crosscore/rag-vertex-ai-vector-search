@@ -8,7 +8,7 @@ PROJECT_ID = "business-test-001"
 REGION = "asia-northeast1"
 
 # Vector Search settings
-INDEX_NAME = "table_metadata_index"
+INDEX_DISPLAY_NAME = "table_metadata_index"
 INDEX_ENDPOINT_ID = "table_metadata_index_endpoint"
 DEPLOYED_INDEX_ID = "table_metadata_index_deployed"
 

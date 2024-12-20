@@ -11,7 +11,7 @@ import os
 from ..common.config import (
     PROJECT_ID,
     REGION,
-    INDEX_NAME,
+    INDEX_DISPLAY_NAME,
     INDEX_ENDPOINT_ID,
     DEPLOYED_INDEX_ID,
     FIRESTORE_COLLECTION
@@ -109,7 +109,7 @@ class VectorStoreSetup:
             logger.info("インデックスの作成を開始")
             index_start = time.time()
             index_op = self.index_manager.create_index(
-                display_name=INDEX_NAME,
+                display_name=INDEX_DISPLAY_NAME,
                 dimension=dimension,
                 description="RAG system vector search index"
             )

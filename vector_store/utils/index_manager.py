@@ -215,10 +215,14 @@ class IndexManager:
 
             for deployed_index in endpoint.deployed_indexes:
                 if deployed_index.id == deployed_index_id:
+                    # index_sync_timeの存在を確認してデプロイ状態を判断
+                    is_synced = hasattr(deployed_index, 'index_sync_time')
+
                     state = {
-                        "state": deployed_index.deployment_state.state,
-                        "error_msg": deployed_index.deployment_state.error_message,
+                        "state": "DEPLOYED" if is_synced else "DEPLOYING",
+                        "deployment_group": deployed_index.deployment_group,
                         "create_time": deployed_index.create_time,
+                        "index_sync_time": getattr(deployed_index, 'index_sync_time', None)
                     }
                     logger.info(f"デプロイメント状態: {state}")
                     return state

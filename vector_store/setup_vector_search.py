@@ -169,6 +169,10 @@ class VectorStoreSetup:
                 total_time = int(time.time() - start_time)
                 logger.info("Vector Search設定が正常に完了しました")
                 logger.info(f"総実行時間: {total_time}秒")
+                logger.info(f"デプロイ情報:")
+                logger.info(f"  デプロイグループ: {state['deployment_group']}")
+                logger.info(f"  作成時刻: {state['create_time']}")
+                logger.info(f"  同期時刻: {state['index_sync_time']}")
             else:
                 logger.error(f"デプロイメントに問題が発生: {state}")
                 raise RuntimeError(f"Deployment failed with state: {state['state']}")

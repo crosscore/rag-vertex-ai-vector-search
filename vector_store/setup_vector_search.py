@@ -1,14 +1,13 @@
 # app/vector_store/setup_vector_search.py
-
 """
 Vector Store設定の実行を担当するメインモジュール。
 インデックスの作成、Firestoreへのデータ保存、デプロイメントの実行を統合する。
 """
-
 import uuid
 import time
 from typing import List, Dict, Any
 import logging
+import os
 from ..common.config import (
     PROJECT_ID,
     REGION,
@@ -17,11 +16,10 @@ from ..common.config import (
     DEPLOYED_INDEX_ID,
     FIRESTORE_COLLECTION
 )
-from ..common.utils.embeddings import embed_texts, get_embedding_dimension
+from ..common.utils.embeddings import embed_texts
 from .utils.firestore_ops import FirestoreManager
 from .utils.index_manager import IndexManager
 
-# ロガーの設定
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -183,17 +181,39 @@ class VectorStoreSetup:
             logger.error(f"エラーまでの実行時間: {total_time}秒")
             raise
 
+def load_md_files(md_folder_path: str) -> List[Dict[str, str]]:
+    """MDファイルから情報を読み込み、辞書のリストとして返す
+
+    Args:
+        md_folder_path: MDファイルが格納されているフォルダのパス
+
+    Returns:
+        MDファイルの情報を格納した辞書のリスト
+        各辞書はファイル名(拡張子なし)をキー、ファイルの内容を値とする
+    """
+    md_files_info = []
+    for filename in os.listdir(md_folder_path):
+        if filename.endswith(".md"):
+            file_path = os.path.join(md_folder_path, filename)
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            md_files_info.append({filename[:-3]: content})
+    return md_files_info
+
 def main():
     """メイン実行関数"""
-    # サンプルテキスト
-    table_texts = [
-        "test_table: テストデータ保存用のテーブルです。",
-        "outliers_table: 外れ値データを含むテーブルです。",
-    ]
+    # MDファイルが格納されているフォルダのパス
+    md_folder_path = os.path.join(os.path.dirname(__file__), "md")
 
     try:
+        # MDファイルから情報を読み込む
+        md_files_info = load_md_files(md_folder_path)
+
+        # 各MDファイルの内容をリストにまとめる
+        texts = [list(md_info.values())[0] for md_info in md_files_info]
+
         setup = VectorStoreSetup()
-        setup.setup_vector_search(table_texts)
+        setup.setup_vector_search(texts)
     except Exception as e:
         logger.error(f"実行エラー: {str(e)}")
         raise

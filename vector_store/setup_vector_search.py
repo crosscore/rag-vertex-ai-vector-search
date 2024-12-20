@@ -12,7 +12,7 @@ from ..common.config import (
     PROJECT_ID,
     REGION,
     INDEX_DISPLAY_NAME,
-    INDEX_ENDPOINT_ID,
+    ENDPOINT_DISPLAY_NAME,
     DEPLOYED_INDEX_ID,
     FIRESTORE_COLLECTION
 )
@@ -121,7 +121,7 @@ class VectorStoreSetup:
             logger.info("エンドポイントの作成を開始")
             endpoint_start = time.time()
             endpoint_op = self.index_manager.create_endpoint(
-                display_name=INDEX_ENDPOINT_ID,
+                display_name=ENDPOINT_DISPLAY_NAME,
                 description="RAG system vector search endpoint"
             )
             endpoint_result = self.index_manager.wait_for_operation(endpoint_op)

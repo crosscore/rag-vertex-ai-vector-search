@@ -33,7 +33,7 @@ class VectorStoreSetup:
         self.index_manager = IndexManager(PROJECT_ID, REGION)
 
     def process_texts(self,
-                     texts: List[str]) -> Dict[str, Any]:
+                        texts: List[str]) -> Dict[str, Any]:
         """テキストの処理とメタデータの保存を実行
 
         Args:
@@ -84,11 +84,14 @@ class VectorStoreSetup:
             raise
 
     def setup_vector_search(self,
-                          texts: List[str]) -> None:
+                            texts: List[str]) -> None:
         """Vector Search環境の設定を実行
 
         Args:
             texts: 初期データとして使用するテキストリスト
+
+        Returns:
+            None
 
         Raises:
             Exception: セットアップ中にエラーが発生した場合
@@ -126,8 +129,24 @@ class VectorStoreSetup:
                 endpoint_name=endpoint_result.name,
                 deployed_index_id=DEPLOYED_INDEX_ID
             )
-            deploy_result = self.index_manager.wait_for_operation(deploy_op)
-            logger.info(f"デプロイ完了: {deploy_result.name}")
+            self.index_manager.wait_for_operation(deploy_op)
+
+            # デプロイ後のエンドポイント情報を取得
+            endpoint_info = self.index_manager.endpoint_client.get_index_endpoint(
+                name=endpoint_result.name
+            )
+
+            logger.info("インデックスのデプロイが完了しました")
+            logger.info(f"パブリックエンドポイント: {endpoint_info.public_endpoint_domain_name}")
+
+            # デプロイされたインデックスの情報をログ出力
+            for deployed_index in endpoint_info.deployed_indexes:
+                if deployed_index.id == DEPLOYED_INDEX_ID:
+                    logger.info(f"デプロイ済みインデックス情報:")
+                    logger.info(f"  ID: {deployed_index.id}")
+                    logger.info(f"  作成時刻: {deployed_index.create_time}")
+                    logger.info(f"  インデックスパス: {deployed_index.index}")
+                    break
 
             # デプロイメント状態の確認
             state = self.index_manager.get_deployment_state(

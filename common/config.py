@@ -16,7 +16,7 @@ DEPLOYED_INDEX_ID = "table_metadata_index_deployed"
 EMBEDDING_MODEL = "text-multilingual-embedding-002"
 
 # Firestore settings
-FIRESTORE_DATABASE_ID = "test-database-001"
+FIRESTORE_DATABASE_ID = "database-test-001"
 FIRESTORE_COLLECTION = "table_metadata"
 
 # BigQuery settings

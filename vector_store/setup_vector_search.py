@@ -2,6 +2,7 @@ from typing import List, Dict, Any
 import logging
 import os
 import uuid
+from datetime import datetime
 import time
 from google.cloud.aiplatform_v1 import IndexServiceClient
 from google.cloud.aiplatform_v1.types import IndexDatapoint, UpsertDatapointsRequest
@@ -30,47 +31,65 @@ class VectorStoreSetup:
         self.logger = logging.getLogger(__name__)
 
     def process_texts(self, texts: List[Dict[str, str]]) -> Dict[str, Any]:
-        """Process texts to generate embeddings and create datapoints
-
-        Args:
-            texts: List of texts to process. Each element should be a dictionary with
-                'filename' and 'content' keys.
-
-        Returns:
-            Dictionary containing processed information:
-                - datapoints: List of IndexDatapoint objects
-                - metadata_list: List of metadata for Firestore
-                - dimension: Dimension of the embeddings
-
-        Raises:
-            Exception: If text processing fails
-        """
+        """Process texts to generate embeddings and create datapoints"""
         try:
             # Generate embeddings
-            self.logger.info("Generating embeddings...")
             embeddings = embed_texts(texts)
             dimension = len(embeddings[0])
 
             # Generate data point IDs
             data_point_ids = [str(uuid.uuid4()) for _ in texts]
 
-            # Create IndexDatapoints for Vector Search
-            datapoints = [
-                IndexDatapoint(
-                    datapoint_id=data_point_id,
-                    feature_vector=embedding
+            # Create IndexDatapoints with enhanced metadata
+            datapoints = []
+            for data_point_id, embedding, text in zip(data_point_ids, embeddings, texts):
+                # 基本的な制限（ファイルタイプとコンテンツタイプ）
+                file_restrict = IndexDatapoint.Restriction(
+                    namespace="file_type",
+                    allow_list=["markdown"]
                 )
-                for data_point_id, embedding in zip(data_point_ids, embeddings)
-            ]
+                content_restrict = IndexDatapoint.Restriction(
+                    namespace="content_type",
+                    allow_list=["documentation"]
+                )
 
-            # Prepare metadata for Firestore
+                # 数値ベースの制限（埋め込みの次元とコンテンツ長）
+                dimension_restrict = IndexDatapoint.NumericRestriction(
+                    namespace="embedding_dimension",
+                    value_int=dimension
+                )
+                content_length_restrict = IndexDatapoint.NumericRestriction(
+                    namespace="content_length",
+                    value_int=len(text['content'])
+                )
+
+                # クラウディングタグ（ファイル名ベース）
+                crowding = IndexDatapoint.CrowdingTag(
+                    crowding_attribute=text['filename']
+                )
+
+                # データポイントの作成
+                datapoint = IndexDatapoint(
+                    datapoint_id=data_point_id,
+                    feature_vector=embedding,
+                    restricts=[file_restrict, content_restrict],
+                    numeric_restricts=[dimension_restrict, content_length_restrict],
+                    crowding_tag=crowding
+                )
+                datapoints.append(datapoint)
+
+            # Firestoreのメタデータを拡張
             metadata_list = [
                 {
                     'data_point_id': data_point_id,
                     'filename': text['filename'],
                     'content': text['content'],
                     'additional_metadata': {
-                        'embedding_dimension': dimension
+                        'embedding_dimension': dimension,
+                        'content_length': len(text['content']),
+                        'file_type': 'markdown',
+                        'content_type': 'documentation',
+                        'created_at': datetime.now().isoformat()
                     }
                 }
                 for data_point_id, text in zip(data_point_ids, texts)
@@ -81,6 +100,7 @@ class VectorStoreSetup:
                 'metadata_list': metadata_list,
                 'dimension': dimension
             }
+
         except Exception as e:
             self.logger.error(f"Text processing error: {str(e)}")
             raise

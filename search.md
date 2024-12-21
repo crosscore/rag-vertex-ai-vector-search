@@ -24,3 +24,18 @@ datapoints = get_datapoints(
     datapoint_ids=["id1", "id2"]
 )
 ```
+
+## Restriction の定義によるフィルタリング
+```
+# 検索時のフィルタリング
+results = endpoint.find_neighbors(
+    deployed_index_id="my_index",
+    queries=[query_vector],
+    filter_namespaces=[
+        Namespace(
+            name="file_type",
+            allow_tokens=["markdown"]  # markdownファイルのみを検索
+        )
+    ]
+)
+```

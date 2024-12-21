@@ -9,13 +9,13 @@ from ...common.config import PROJECT_ID, REGION, FIRESTORE_DATABASE_ID
 logger = logging.getLogger(__name__)
 
 class FirestoreManager:
-    """Firestoreデータ操作を管理するクラス"""
+    """Class to manage Firestore data operations"""
 
     def __init__(self):
         """
         Args:
-            project_id: Google CloudプロジェクトID
-            database_id: 使用するデータベースID
+            project_id: Google Cloud project ID
+            database_id: Database ID to use
         """
         self.project_id = PROJECT_ID
         self.database_id = FIRESTORE_DATABASE_ID
@@ -23,16 +23,16 @@ class FirestoreManager:
         self._initialize_client()
 
     def _initialize_client(self) -> None:
-        """Firestoreクライアントを初期化"""
+        """Initialize Firestore client"""
         try:
             self.db = firestore.Client(
                 project=self.project_id,
                 database=self.database_id
             )
-            logger.info(f"Firestoreクライアントの初期化完了: project={self.project_id}, database={self.database_id}")
+            logger.info(f"Firestore client initialized: project={self.project_id}, database={self.database_id}")
 
         except Exception as e:
-            logger.error(f"Firestore初期化エラー: {str(e)}")
+            logger.error(f"Firestore initialization error: {str(e)}")
             raise
 
     def save_text_metadata(self,
@@ -40,21 +40,21 @@ class FirestoreManager:
                             data_point_id: str,
                             text: str,
                             additional_metadata: Optional[Dict[str, Any]] = None) -> None:
-        """テキストのメタデータをFirestoreに保存
+        """Save text metadata to Firestore
 
         Args:
-            collection: コレクション名
-            data_point_id: データポイントID
-            text: 保存するテキスト
-            additional_metadata: 追加のメタデータ（オプション）
+            collection: Collection name
+            data_point_id: Data point ID
+            text: Text to save
+            additional_metadata: Additional metadata (optional)
 
         Raises:
-            GoogleAPIError: Firestore操作に失敗した場合
+            GoogleAPIError: If Firestore operation fails
         """
         try:
             doc_ref = self.db.collection(collection).document(data_point_id)
 
-            # 基本メタデータの準備
+            # Prepare basic metadata
             metadata = {
                 "data_point_id": data_point_id,
                 "text": text,
@@ -62,62 +62,62 @@ class FirestoreManager:
                 "updated_at": datetime.now()
             }
 
-            # 追加メタデータがある場合は統合
+            # Integrate additional metadata if available
             if additional_metadata:
                 metadata.update(additional_metadata)
 
-            # データを保存
+            # Save data
             doc_ref.set(metadata)
-            logger.info(f"メタデータを保存しました: collection={collection}, id={data_point_id}")
+            logger.info(f"Metadata saved: collection={collection}, id={data_point_id}")
 
         except GoogleAPIError as e:
-            logger.error(f"メタデータ保存エラー: {str(e)}")
+            logger.error(f"Metadata save error: {str(e)}")
             raise
 
     def get_text_metadata(self,
                             collection: str,
                             data_point_id: str) -> Optional[Dict[str, Any]]:
-        """テキストのメタデータをFirestoreから取得
+        """Retrieve text metadata from Firestore
 
         Args:
-            collection: コレクション名
-            data_point_id: データポイントID
+            collection: Collection name
+            data_point_id: Data point ID
 
         Returns:
-            メタデータの辞書。存在しない場合はNone
+            Metadata dictionary. None if not found
 
         Raises:
-            GoogleAPIError: Firestore操作に失敗した場合
+            GoogleAPIError: If Firestore operation fails
         """
         try:
             doc_ref = self.db.collection(collection).document(data_point_id)
             doc = doc_ref.get()
 
             if doc.exists:
-                logger.info(f"メタデータを取得しました: collection={collection}, id={data_point_id}")
+                logger.info(f"Metadata retrieved: collection={collection}, id={data_point_id}")
                 return doc.to_dict()
             else:
-                logger.warning(f"メタデータが見つかりません: collection={collection}, id={data_point_id}")
+                logger.warning(f"Metadata not found: collection={collection}, id={data_point_id}")
                 return None
 
         except GoogleAPIError as e:
-            logger.error(f"メタデータ取得エラー: {str(e)}")
+            logger.error(f"Metadata retrieval error: {str(e)}")
             raise
 
     def batch_save_text_metadata(self,
                                 collection: str,
                                 metadata_list: List[Dict[str, Any]]) -> None:
-        """複数のテキストメタデータをバッチ保存
+        """Batch save multiple text metadata
 
         Args:
-            collection: コレクション名
-            metadata_list: メタデータのリスト。各要素は以下のキーを含む必要がある:
-                            - data_point_id: データポイントID
-                            - text: テキスト
-                            - additional_metadata: 追加のメタデータ（オプション）
+            collection: Collection name
+            metadata_list: List of metadata. Each element must contain the following keys:
+                            - data_point_id: Data point ID
+                            - text: Text
+                            - additional_metadata: Additional metadata (optional)
 
         Raises:
-            GoogleAPIError: Firestore操作に失敗した場合
+            GoogleAPIError: If Firestore operation fails
         """
         try:
             batch = self.db.batch()
@@ -126,7 +126,7 @@ class FirestoreManager:
             for metadata in metadata_list:
                 doc_ref = self.db.collection(collection).document(metadata['data_point_id'])
 
-                # 基本メタデータの準備
+                # Prepare basic metadata
                 doc_data = {
                     "data_point_id": metadata['data_point_id'],
                     "text": metadata['text'],
@@ -134,43 +134,43 @@ class FirestoreManager:
                     "updated_at": now
                 }
 
-                # 追加メタデータがある場合は統合
+                # Integrate additional metadata if available
                 if 'additional_metadata' in metadata:
                     doc_data.update(metadata['additional_metadata'])
 
                 batch.set(doc_ref, doc_data)
 
-            # バッチ書き込みを実行
+            # Execute batch write
             batch.commit()
-            logger.info(f"バッチ保存完了: {len(metadata_list)}件")
+            logger.info(f"Batch save completed: {len(metadata_list)} items")
 
         except GoogleAPIError as e:
-            logger.error(f"バッチ保存エラー: {str(e)}")
+            logger.error(f"Batch save error: {str(e)}")
             raise
 
     def update_text_metadata(self,
                             collection: str,
                             data_point_id: str,
                             updates: Dict[str, Any]) -> None:
-        """テキストのメタデータを更新
+        """Update text metadata
 
         Args:
-            collection: コレクション名
-            data_point_id: データポイントID
-            updates: 更新するフィールドと値の辞書
+            collection: Collection name
+            data_point_id: Data point ID
+            updates: Dictionary of fields and values to update
 
         Raises:
-            GoogleAPIError: Firestore操作に失敗した場合
+            GoogleAPIError: If Firestore operation fails
         """
         try:
             doc_ref = self.db.collection(collection).document(data_point_id)
 
-            # 更新日時を自動的に追加
+            # Automatically add update time
             updates['updated_at'] = datetime.now()
 
             doc_ref.update(updates)
-            logger.info(f"メタデータを更新しました: collection={collection}, id={data_point_id}")
+            logger.info(f"Metadata updated: collection={collection}, id={data_point_id}")
 
         except GoogleAPIError as e:
-            logger.error(f"メタデータ更新エラー: {str(e)}")
+            logger.error(f"Metadata update error: {str(e)}")
             raise

@@ -1,7 +1,7 @@
 # app/vector_store/setup_vector_search.py
 """
-Vector Store設定の実行を担当するメインモジュール。
-インデックスの作成、Firestoreへのデータ保存、デプロイメントの実行を統合する。
+Main module responsible for executing Vector Store setup.
+Integrates index creation, data storage in Firestore, and deployment execution.
 """
 import uuid
 import time
@@ -17,45 +17,45 @@ from ..common.config import (
     FIRESTORE_COLLECTION
 )
 from ..common.utils.embeddings import embed_texts
+from ..common.utils.vector_search import VectorSearchClient
 from .utils.firestore_ops import FirestoreManager
 from .utils.index_manager import IndexManager
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 class VectorStoreSetup:
-    """Vector Store設定の実行を管理するクラス"""
+    """Class to manage Vector Store setup execution"""
 
     def __init__(self):
-        """必要なマネージャーとクライアントを初期化"""
+        """Initialize necessary managers and clients"""
         self.firestore_manager = FirestoreManager()
         self.index_manager = IndexManager(PROJECT_ID, REGION)
+        self.logger = logging.getLogger(__name__)
 
     def process_texts(self,
-                        texts: List[str]) -> Dict[str, Any]:
-        """テキストの処理とメタデータの保存を実行
+                        texts: List[Dict[str, str]]) -> Dict[str, Any]:
+        """Processes texts and stores metadata
 
         Args:
-            texts: 処理対象のテキストリスト
+            texts: List of texts to be processed
 
         Returns:
-            処理結果を含む辞書
+            Dictionary containing processing results
 
         Raises:
-            Exception: 処理中にエラーが発生した場合
+            Exception: If an error occurs during processing
         """
         try:
-            # データポイントIDの生成
+            # Generate data point IDs
             data_point_ids = [str(uuid.uuid4()) for _ in texts]
 
-            # Embeddingの生成
-            logger.info("Embeddingの生成を開始")
+            # Generate embeddings
+            text_contents = [text_info['content'] for text_info in texts]
+            self.logger.info("Start generating embeddings")
             embeddings = embed_texts(texts)
             embedding_dimension = len(embeddings[0])
-            logger.info(f"Embedding生成完了: {len(embeddings)}件, 次元数: {embedding_dimension}")
+            self.logger.info(f"Embeddings generated: {len(embeddings)} items, dimension: {embedding_dimension}")
 
-            # Firestoreへのメタデータ保存
-            logger.info("Firestoreへのメタデータ保存を開始")
+            # Save metadata to Firestore
+            self.logger.info("Start saving metadata to Firestore")
             metadata_list = [
                 {
                     'data_point_id': data_point_id,
@@ -64,13 +64,13 @@ class VectorStoreSetup:
                         'embedding_dimension': embedding_dimension
                     }
                 }
-                for data_point_id, text in zip(data_point_ids, texts)
+                for data_point_id, text in zip(data_point_ids, text_contents)
             ]
             self.firestore_manager.batch_save_text_metadata(
                 FIRESTORE_COLLECTION,
                 metadata_list
             )
-            logger.info("メタデータ保存完了")
+            self.logger.info("Metadata saved")
 
             return {
                 'data_point_ids': data_point_ids,
@@ -79,34 +79,36 @@ class VectorStoreSetup:
             }
 
         except Exception as e:
-            logger.error(f"テキスト処理エラー: {str(e)}")
+            self.logger.error(f"Text processing error: {str(e)}")
             raise
 
     def setup_vector_search(self,
-                            texts: List[str]) -> None:
-        """Vector Search環境の設定を実行
+                            texts: List[Dict[str, str]]) -> None:
+        """Executes Vector Search environment setup
 
         Args:
-            texts: 初期データとして使用するテキストリスト
+            texts: List of texts to be used as initial data
 
         Returns:
             None
 
         Raises:
-            Exception: セットアップ中にエラーが発生した場合
+            Exception: If an error occurs during setup
         """
         start_time = time.time()
         try:
-            logger.info("Vector Search設定を開始")
+            self.logger.info("Starting Vector Search setup")
 
-            # テキストの処理
+            # Process texts
             process_start = time.time()
             process_result = self.process_texts(texts)
+            data_point_ids = process_result['data_point_ids']
+            embeddings = process_result['embeddings']
             dimension = process_result['dimension']
-            logger.info(f"テキスト処理時間: {int(time.time() - process_start)}秒")
+            self.logger.info(f"Text processing time: {int(time.time() - process_start)} seconds")
 
-            # インデックスの作成
-            logger.info("インデックスの作成を開始")
+            # Create index
+            self.logger.info("Start creating index")
             index_start = time.time()
             index_op = self.index_manager.create_index(
                 display_name=INDEX_DISPLAY_NAME,
@@ -114,82 +116,94 @@ class VectorStoreSetup:
                 description="RAG system vector search index"
             )
             index_result = self.index_manager.wait_for_operation(index_op)
-            logger.info(f"インデックス作成完了: {index_result.name}")
-            logger.info(f"インデックス作成時間: {int(time.time() - index_start)}秒")
+            index_name = index_result.name
+            self.logger.info(f"Index created: {index_name}")
+            self.logger.info(f"Index creation time: {int(time.time() - index_start)} seconds")
 
-            # エンドポイントの作成
-            logger.info("エンドポイントの作成を開始")
+            # Create endpoint
+            self.logger.info("Start creating endpoint")
             endpoint_start = time.time()
             endpoint_op = self.index_manager.create_endpoint(
                 display_name=ENDPOINT_DISPLAY_NAME,
                 description="RAG system vector search endpoint"
             )
             endpoint_result = self.index_manager.wait_for_operation(endpoint_op)
-            logger.info(f"エンドポイント作成完了: {endpoint_result.name}")
-            logger.info(f"エンドポイント作成時間: {int(time.time() - endpoint_start)}秒")
+            endpoint_name = endpoint_result.name
+            self.logger.info(f"Endpoint created: {endpoint_name}")
+            self.logger.info(f"Endpoint creation time: {int(time.time() - endpoint_start)} seconds")
 
-            # インデックスのデプロイ
-            logger.info("インデックスのデプロイを開始")
+            # Deploy index
+            self.logger.info("Start deploying index")
             deploy_start = time.time()
             deploy_op = self.index_manager.deploy_index(
-                index_name=index_result.name,
-                endpoint_name=endpoint_result.name,
+                index_name=index_name,
+                endpoint_name=endpoint_name,
                 deployed_index_id=DEPLOYED_INDEX_ID
             )
             self.index_manager.wait_for_operation(deploy_op)
 
-            # デプロイ後のエンドポイント情報を取得
+            # Get endpoint information after deployment
             endpoint_info = self.index_manager.endpoint_client.get_index_endpoint(
-                name=endpoint_result.name
+                name=endpoint_name
             )
 
             deploy_time = int(time.time() - deploy_start)
-            logger.info("インデックスのデプロイが完了しました")
-            logger.info(f"デプロイ所要時間: {deploy_time}秒")
-            logger.info(f"パブリックエンドポイント: {endpoint_info.public_endpoint_domain_name}")
+            self.logger.info("Index deployment completed")
+            self.logger.info(f"Deployment time: {deploy_time} seconds")
+            self.logger.info(f"Public endpoint: {endpoint_info.public_endpoint_domain_name}")
 
-            # デプロイされたインデックスの情報をログ出力
+            # Output deployed index information to logs
             for deployed_index in endpoint_info.deployed_indexes:
                 if deployed_index.id == DEPLOYED_INDEX_ID:
-                    logger.info(f"デプロイ済みインデックス情報:")
-                    logger.info(f"  ID: {deployed_index.id}")
-                    logger.info(f"  作成時刻: {deployed_index.create_time}")
-                    logger.info(f"  インデックスパス: {deployed_index.index}")
+                    self.logger.info(f"Deployed index information:")
+                    self.logger.info(f"  ID: {deployed_index.id}")
+                    self.logger.info(f"  Creation time: {deployed_index.create_time}")
+                    self.logger.info(f"  Index path: {deployed_index.index}")
                     break
 
-            # デプロイメント状態の確認
+            # Check deployment status
             state = self.index_manager.get_deployment_state(
-                endpoint_result.name,
+                endpoint_name,
                 DEPLOYED_INDEX_ID
             )
 
             if state['state'] == "DEPLOYED":
+                # Upsert data points to the index after successful deployment
+                self.logger.info("Start upserting data points to the index")
+                vector_search_client = VectorSearchClient(PROJECT_ID, REGION, endpoint_info)
+                data_points = [
+                    {'id': data_point_id, 'embedding': embedding}
+                    for data_point_id, embedding in zip(data_point_ids, embeddings)
+                ]
+                vector_search_client.upsert_data_points(DEPLOYED_INDEX_ID, data_points)
+                self.logger.info("Data points upserted to the index")
+
                 total_time = int(time.time() - start_time)
-                logger.info("Vector Search設定が正常に完了しました")
-                logger.info(f"総実行時間: {total_time}秒")
-                logger.info(f"デプロイ情報:")
-                logger.info(f"  デプロイグループ: {state['deployment_group']}")
-                logger.info(f"  作成時刻: {state['create_time']}")
-                logger.info(f"  同期時刻: {state['index_sync_time']}")
+                self.logger.info("Vector Search setup completed successfully")
+                self.logger.info(f"Total execution time: {total_time} seconds")
+                self.logger.info(f"Deployment information:")
+                self.logger.info(f"  Deployment group: {state['deployment_group']}")
+                self.logger.info(f"  Creation time: {state['create_time']}")
+                self.logger.info(f"  Index sync time: {state['index_sync_time']}")
             else:
-                logger.error(f"デプロイメントに問題が発生: {state}")
+                self.logger.error(f"Deployment issue detected: {state}")
                 raise RuntimeError(f"Deployment failed with state: {state['state']}")
 
         except Exception as e:
             total_time = int(time.time() - start_time)
-            logger.error(f"Vector Search設定エラー: {str(e)}")
-            logger.error(f"エラーまでの実行時間: {total_time}秒")
+            self.logger.error(f"Vector Search setup error: {str(e)}")
+            self.logger.error(f"Execution time until error: {total_time} seconds")
             raise
 
 def load_md_files(md_folder_path: str) -> List[Dict[str, str]]:
-    """MDファイルから情報を読み込み、辞書のリストとして返す
+    """Loads information from MD files and returns it as a list of dictionaries
 
     Args:
-        md_folder_path: MDファイルが格納されているフォルダのパス
+        md_folder_path: Path to the folder containing the MD files
 
     Returns:
-        MDファイルの情報を格納した辞書のリスト
-        各辞書はファイル名(拡張子なし)をキー、ファイルの内容を値とする
+        List of dictionaries containing MD file information
+        Each dictionary has the filename (without extension) as the key and the file content as the value
     """
     md_files_info = []
     for filename in os.listdir(md_folder_path):
@@ -201,18 +215,32 @@ def load_md_files(md_folder_path: str) -> List[Dict[str, str]]:
     return md_files_info
 
 def main():
-    """メイン実行関数"""
-    # MDファイルが格納されているフォルダのパス
+    """Main execution function"""
+    # Log settings
+    log_dir = 'app/log'
+    os.makedirs(log_dir, exist_ok=True)
+    log_filename = os.path.join(log_dir, 'vector_store_setup.log')
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(log_filename, mode='w')  # Overwrite each time with 'w' mode
+        ]
+    )
+    logger = logging.getLogger(__name__)
+
+    # Path to the folder containing MD files
     md_folder_path = os.path.join(os.path.dirname(__file__), "md")
 
     try:
-        # MDファイルから情報を読み込む
+        # Load information from MD files
         md_files_info = load_md_files(md_folder_path)
 
         setup = VectorStoreSetup()
         setup.setup_vector_search(md_files_info)
     except Exception as e:
-        logger.error(f"実行エラー: {str(e)}")
+        logger.error(f"Execution error: {str(e)}")
         raise
 
 if __name__ == "__main__":

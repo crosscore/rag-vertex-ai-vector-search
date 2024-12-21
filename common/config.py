@@ -1,7 +1,7 @@
 # app/common/config.py
 """
-RAGシステムの共通設定値を管理するモジュール。
-プロジェクトID、リージョン、モデル名などの基本設定。
+A module that manages common settings for the RAG system.
+Basic settings such as project ID, region, and model name.
 """
 # Google Cloud Project settings
 PROJECT_ID = "business-test-001"
@@ -46,9 +46,8 @@ DEPLOYMENT_CONFIG = {
 }
 
 # Timeout settings
-DEPLOYMENT_TIMEOUT_MINUTES = 45
+DEPLOYMENT_TIMEOUT_MINUTES = 45  # minutes
 DEPLOYMENT_CHECK_INTERVAL = 1  # seconds
 
 # Token limits
 MAX_TOKENS_PER_TEXT = 2042
-MAX_TOTAL_TOKENS = 3072

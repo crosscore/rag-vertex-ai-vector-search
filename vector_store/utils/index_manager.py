@@ -1,10 +1,8 @@
 # app/vector_store/utils/index_manager.py
-
 """
-Vector Search インデックスの管理を担当するモジュール。
-インデックスの作成、デプロイ、監視などの機能を提供する。
+Module responsible for managing Vector Search indexes.
+Provides functions for index creation, deployment, monitoring, etc.
 """
-
 from google.cloud import aiplatform
 from google.cloud.aiplatform_v1 import (
     IndexServiceClient,
@@ -26,49 +24,48 @@ from ...common.config import (
     DEPLOYMENT_CHECK_INTERVAL
 )
 
-# ロガーの設定
 logger = logging.getLogger(__name__)
 
 class IndexManager:
-    """Vector Search インデックスの管理を行うクラス"""
+    """Class to manage Vector Search indexes"""
 
     def __init__(self, project_id: str = PROJECT_ID, region: str = REGION):
         """
         Args:
-            project_id: プロジェクトID
-            region: リージョン
+            project_id: Project ID
+            region: Region
         """
         self.project_id = project_id
         self.region = region
         self.parent = f"projects/{project_id}/locations/{region}"
 
-        # APIクライアントの初期化
+        # Initialize API clients
         client_options = {"api_endpoint": f"{region}-aiplatform.googleapis.com"}
         self.index_client = IndexServiceClient(client_options=client_options)
         self.endpoint_client = IndexEndpointServiceClient(client_options=client_options)
 
-        # Vertex AI の初期化
+        # Initialize Vertex AI
         aiplatform.init(project=project_id, location=region)
 
     def create_index(self,
                     display_name: str,
                     dimension: int,
                     description: Optional[str] = None) -> Operation:
-        """新しいインデックスを作成する
+        """Create a new index
 
         Args:
-            display_name: インデックスの表示名
-            dimension: ベクトルの次元数
-            description: インデックスの説明（オプション）
+            display_name: Display name of the index
+            dimension: Number of dimensions of the vector
+            description: Description of the index (optional)
 
         Returns:
-            作成操作のOperation
+            Operation of the creation process
 
         Raises:
-            GoogleAPIError: インデックス作成に失敗した場合
+            GoogleAPIError: If index creation fails
         """
         try:
-            # インデックス設定の準備
+            # Prepare index configuration
             config = INDEX_CONFIG.copy()
             config['dimensions'] = dimension
 
@@ -79,33 +76,33 @@ class IndexManager:
                 metadata={"config": config}
             )
 
-            # インデックス作成操作の実行
+            # Execute index creation operation
             operation = self.index_client.create_index(
                 parent=self.parent,
                 index=index
             )
 
-            logger.info(f"インデックス作成を開始しました: {display_name}")
+            logger.info(f"Index creation started: {display_name}")
             return operation
 
         except GoogleAPIError as e:
-            logger.error(f"インデックス作成エラー: {str(e)}")
+            logger.error(f"Index creation error: {str(e)}")
             raise
 
     def create_endpoint(self,
                         display_name: str,
                         description: Optional[str] = None) -> Operation:
-        """新しいエンドポイントを作成する
+        """Create a new endpoint
 
         Args:
-            display_name: エンドポイントの表示名
-            description: エンドポイントの説明（オプション）
+            display_name: Display name of the endpoint
+            description: Description of the endpoint (optional)
 
         Returns:
-            作成操作のOperation
+            Operation of the creation process
 
         Raises:
-            GoogleAPIError: エンドポイント作成に失敗した場合
+            GoogleAPIError: If endpoint creation fails
         """
         try:
             endpoint = IndexEndpoint(
@@ -119,29 +116,29 @@ class IndexManager:
                 index_endpoint=endpoint
             )
 
-            logger.info(f"エンドポイント作成を開始しました: {display_name}")
+            logger.info(f"Endpoint creation started: {display_name}")
             return operation
 
         except GoogleAPIError as e:
-            logger.error(f"エンドポイント作成エラー: {str(e)}")
+            logger.error(f"Endpoint creation error: {str(e)}")
             raise
 
     def deploy_index(self,
                     index_name: str,
                     endpoint_name: str,
                     deployed_index_id: str) -> Operation:
-        """インデックスをエンドポイントにデプロイする
+        """Deploy an index to an endpoint
 
         Args:
-            index_name: デプロイするインデックスの名前
-            endpoint_name: デプロイ先のエンドポイント名
-            deployed_index_id: デプロイ済みインデックスのID
+            index_name: Name of the index to deploy
+            endpoint_name: Name of the endpoint to deploy to
+            deployed_index_id: ID of the deployed index
 
         Returns:
-            デプロイ操作のOperation
+            Operation of the deployment process
 
         Raises:
-            GoogleAPIError: デプロイに失敗した場合
+            GoogleAPIError: If deployment fails
         """
         try:
             deploy_request = {
@@ -155,67 +152,67 @@ class IndexManager:
             }
 
             operation = self.endpoint_client.deploy_index(request=deploy_request)
-            logger.info(f"インデックスのデプロイを開始しました: {deployed_index_id}")
+            logger.info(f"Index deployment started: {deployed_index_id}")
             return operation
 
         except GoogleAPIError as e:
-            logger.error(f"インデックスデプロイエラー: {str(e)}")
+            logger.error(f"Index deployment error: {str(e)}")
             raise
 
     def wait_for_operation(self,
                             operation: Operation,
                             timeout_minutes: int = DEPLOYMENT_TIMEOUT_MINUTES) -> Any:
-        """操作の完了を待機する
+        """Wait for the operation to complete
 
         Args:
-            operation: 待機する操作
-            timeout_minutes: タイムアウトまでの分数
+            operation: Operation to wait for
+            timeout_minutes: Timeout in minutes
 
         Returns:
-            操作の結果
+            Result of the operation
 
         Raises:
-            TimeoutError: 指定時間内に操作が完了しなかった場合
-            GoogleAPIError: 操作が失敗した場合
+            TimeoutError: If the operation does not complete within the specified time
+            GoogleAPIError: If the operation fails
         """
         try:
             start_time = time.time()
             while True:
                 if operation.done():
-                    logger.info("操作が完了しました")
+                    logger.info("Operation completed")
                     return operation.result()
 
                 if time.time() - start_time > timeout_minutes * 60:
-                    raise TimeoutError(f"操作がタイムアウトしました: {timeout_minutes}分")
+                    raise TimeoutError(f"Operation timed out: {timeout_minutes} minutes")
 
-                logger.debug("操作の完了を待機中...")
+                logger.debug("Waiting for operation to complete...")
                 time.sleep(DEPLOYMENT_CHECK_INTERVAL)
 
         except GoogleAPIError as e:
-            logger.error(f"操作待機中にエラーが発生: {str(e)}")
+            logger.error(f"Error while waiting for operation: {str(e)}")
             raise
 
     def get_deployment_state(self,
                             endpoint_name: str,
                             deployed_index_id: str) -> Dict[str, Any]:
-        """デプロイの状態を取得する
+        """Get the deployment state
 
         Args:
-            endpoint_name: エンドポイント名
-            deployed_index_id: デプロイ済みインデックスのID
+            endpoint_name: Endpoint name
+            deployed_index_id: Deployed index ID
 
         Returns:
-            デプロイメントの状態情報を含む辞書
+            Dictionary containing deployment state information
 
         Raises:
-            GoogleAPIError: 状態取得に失敗した場合
+            GoogleAPIError: If state retrieval fails
         """
         try:
             endpoint = self.endpoint_client.get_index_endpoint(name=endpoint_name)
 
             for deployed_index in endpoint.deployed_indexes:
                 if deployed_index.id == deployed_index_id:
-                    # index_sync_timeの存在を確認してデプロイ状態を判断
+                    # Check for the existence of index_sync_time to determine deployment state
                     is_synced = hasattr(deployed_index, 'index_sync_time')
 
                     state = {
@@ -224,12 +221,12 @@ class IndexManager:
                         "create_time": deployed_index.create_time,
                         "index_sync_time": getattr(deployed_index, 'index_sync_time', None)
                     }
-                    logger.info(f"デプロイメント状態: {state}")
+                    logger.info(f"Deployment state: {state}")
                     return state
 
-            logger.warning(f"デプロイされたインデックスが見つかりません: {deployed_index_id}")
+            logger.warning(f"Deployed index not found: {deployed_index_id}")
             return {"state": "NOT_FOUND"}
 
         except GoogleAPIError as e:
-            logger.error(f"デプロイメント状態取得エラー: {str(e)}")
+            logger.error(f"Deployment state retrieval error: {str(e)}")
             raise

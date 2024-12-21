@@ -1,10 +1,8 @@
 # app/common/utils/vector_search.py
-
 """
-Vector Search操作の基本機能を提供するモジュール。
-検索、データ追加、削除などの基本操作を実装。
+Module that provides basic functions for Vector Search operations.
+Implements basic operations such as search, add, and delete data.
 """
-
 from google.cloud import aiplatform
 from google.api_core.exceptions import GoogleAPIError
 from typing import List, Dict, Any, Optional
@@ -15,7 +13,7 @@ from ...common.config import EMBEDDING_MODEL
 logger = logging.getLogger(__name__)
 
 class VectorSearchClient:
-    """Vector Search操作を管理するクライアントクラス"""
+    """Client class that manages Vector Search operations"""
 
     def __init__(self,
                     project_id: str,
@@ -23,9 +21,9 @@ class VectorSearchClient:
                     index_endpoint: aiplatform.MatchingEngineIndexEndpoint):
         """
         Args:
-            project_id: プロジェクトID
-            location: リージョン
-            index_endpoint: 使用するインデックスエンドポイント
+            project_id: Project ID
+            location: Region
+            index_endpoint: Index endpoint to use
         """
         self.project_id = project_id
         self.location = location
@@ -35,48 +33,40 @@ class VectorSearchClient:
     def upsert_data_points(self,
                             deployed_index_id: str,
                             data_points: List[Dict[str, Any]]) -> None:
-        """データポイントをインデックスに追加または更新する
-
+        """Add or update data points in the index
         Args:
-            deployed_index_id: デプロイ済みインデックスのID
-            data_points: 追加・更新するデータポイントのリスト
-                        各データポイントは {'id': str, 'embedding': List[float]} の形式
-
-        Raises:
-            GoogleAPIError: API呼び出しに失敗した場合
+            deployed_index_id: ID of the deployed index
+            data_points: List of data points to add or update
+                        Each data point is in the format {'id': str, 'embedding': List[float]}
         """
         try:
-            logger.info(f"{len(data_points)}件のデータポイントの更新を開始")
+            logger.info(f"Start updating {len(data_points)} data points")
             self.index_endpoint.upsert_datapoints(
                 deployed_index_id=deployed_index_id,
                 datapoints=data_points
             )
-            logger.info("データポイントの更新が完了しました")
+            logger.info("Data points update completed")
         except GoogleAPIError as e:
-            logger.error(f"データポイント更新エラー: {str(e)}")
+            logger.error(f"Data points update error: {str(e)}")
             raise
 
     def remove_data_points(self,
                             deployed_index_id: str,
                             ids: List[str]) -> None:
-        """データポイントをインデックスから削除する
-
+        """Remove data points from the index
         Args:
-            deployed_index_id: デプロイ済みインデックスのID
-            ids: 削除するデータポイントのIDリスト
-
-        Raises:
-            GoogleAPIError: API呼び出しに失敗した場合
+            deployed_index_id: ID of the deployed index
+            ids: List of IDs of data points to remove
         """
         try:
-            logger.info(f"{len(ids)}件のデータポイントの削除を開始")
+            logger.info(f"Start deleting {len(ids)} data points")
             self.index_endpoint.remove_datapoints(
                 deployed_index_id=deployed_index_id,
                 datapoint_ids=ids
             )
-            logger.info("データポイントの削除が完了しました")
+            logger.info("Data points deletion completed")
         except GoogleAPIError as e:
-            logger.error(f"データポイント削除エラー: {str(e)}")
+            logger.error(f"Data points deletion error: {str(e)}")
             raise
 
     def search(self,
@@ -84,31 +74,27 @@ class VectorSearchClient:
                 query: str,
                 num_neighbors: int = 5,
                 filter_expr: Optional[str] = None) -> List[Dict[str, Any]]:
-        """クエリに類似したデータポイントを検索する
-
+        """Search for data points similar to the query
         Args:
-            deployed_index_id: デプロイ済みインデックスのID
-            query: 検索クエリ文字列
-            num_neighbors: 取得する近傍点の数
-            filter_expr: フィルタ式（オプション）
+            deployed_index_id: ID of the deployed index
+            query: Search query string
+            num_neighbors: Number of neighbors to retrieve
+            filter_expr: Filter expression (optional)
 
         Returns:
-            検索結果のリスト。各要素は以下の形式:
+            List of search results. Each element is of the form:
             {
-                'id': データポイントID,
-                'distance': 類似度スコア,
-                'neighbor_count': 近傍点数
+                'id': Data point ID,
+                'distance': Similarity score,
+                'neighbor_count': Number of neighbors
             }
-
-        Raises:
-            GoogleAPIError: API呼び出しに失敗した場合
         """
         try:
-            # クエリのembedding生成
-            query_embedding = embed_texts([query], EMBEDDING_MODEL)[0]
-            logger.info(f"検索クエリのembedding生成完了: {len(query_embedding)}次元")
+            # Generate embedding of the query
+            query_embedding = embed_texts([{'filename': 'query', 'content': query}], EMBEDDING_MODEL)[0]
+            logger.info(f"Search query embedding generated: {len(query_embedding)} dimensions")
 
-            # 近傍検索実行
+            # Execute nearest neighbor search
             response = self.index_endpoint.find_neighbors(
                 deployed_index_id=deployed_index_id,
                 queries=[query_embedding],
@@ -116,45 +102,42 @@ class VectorSearchClient:
                 filter=filter_expr
             )
 
-            # レスポンスの整形
+            # Format the response
             results = []
-            for neighbor in response[0]:
+            for neighbor in response[0].nearest_neighbors:
                 results.append({
                     'id': neighbor.id,
                     'distance': neighbor.distance,
-                    'neighbor_count': len(response[0])
+                    'neighbor_count': len(response[0].nearest_neighbors)
                 })
 
-            logger.info(f"検索完了: {len(results)}件の結果")
+            logger.info(f"Search completed: {len(results)} results found")
             return results
 
         except GoogleAPIError as e:
-            logger.error(f"検索実行エラー: {str(e)}")
+            logger.error(f"Search execution error: {str(e)}")
             raise
         except Exception as e:
-            logger.error(f"予期せぬエラー: {str(e)}")
+            logger.error(f"Unexpected error: {str(e)}")
             raise
 
     def get_index_stats(self, deployed_index_id: str) -> Dict[str, Any]:
-        """インデックスの統計情報を取得する
+        """Get index statistics
 
         Args:
-            deployed_index_id: デプロイ済みインデックスのID
+            deployed_index_id: ID of the deployed index
 
         Returns:
-            統計情報を含む辞書
-
-        Raises:
-            GoogleAPIError: API呼び出しに失敗した場合
+            Dictionary containing statistics
         """
         try:
             stats = self.index_endpoint.get_index_stats(deployed_index_id)
-            logger.info(f"インデックス統計情報取得完了: {deployed_index_id}")
+            logger.info(f"Index statistics retrieved: {deployed_index_id}")
             return {
                 'total_data_points': stats.total_data_points,
                 'updated_at': stats.updated_at,
                 'deployed_index_id': deployed_index_id
             }
         except GoogleAPIError as e:
-            logger.error(f"統計情報取得エラー: {str(e)}")
+            logger.error(f"Statistics retrieval error: {str(e)}")
             raise

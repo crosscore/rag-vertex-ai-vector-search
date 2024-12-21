@@ -51,6 +51,7 @@ app/
 -   Vector Store 設定のメインスクリプト
 -   全体のセットアッププロセスを統合
 -   実行エントリーポイント
+-   インデックス作成・デプロイ後、`data_point_id` と `embedding`をインデックスに追加
 
 #### utils/firestore_ops.py
 

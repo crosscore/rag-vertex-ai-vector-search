@@ -10,6 +10,7 @@ from google.cloud.aiplatform_v1 import (
     Index,
     IndexEndpoint
 )
+from google.cloud.aiplatform_v1.types import Index
 from google.api_core.exceptions import GoogleAPIError
 from google.api_core.operation import Operation
 import time
@@ -161,7 +162,7 @@ class IndexManager:
 
     def wait_for_operation(self,
                             operation: Operation,
-                            timeout_minutes: int = DEPLOYMENT_TIMEOUT_MINUTES) -> Any:
+                            timeout_minutes: int = DEPLOYMENT_TIMEOUT_MINUTES) -> Index:
         """Wait for the operation to complete
 
         Args:

@@ -36,7 +36,6 @@ app/
 
 -   テキストの embedding 生成機能
 -   トークン検証
--   次元数の取得
 
 #### utils/vector_search.py
 

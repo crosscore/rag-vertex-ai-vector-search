@@ -95,8 +95,3 @@ def embed_texts(text_info_list: List[Dict[str, str]], model_name: str = EMBEDDIN
     except Exception as e:
         logger.error(f"Embedding generation process error: {str(e)}")
         raise
-
-def get_embedding_dimension(model_name: str = EMBEDDING_MODEL) -> int:
-    model = TextEmbeddingModel.from_pretrained(model_name)
-    sample_embedding = model.get_embeddings(["test"])[0]
-    return len(sample_embedding.values)

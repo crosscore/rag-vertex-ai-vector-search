@@ -1,18 +1,11 @@
-# app/vector_store/setup_vector_search.py
-"""
-Main module responsible for executing Vector Store setup.
-Integrates index creation, data storage in Firestore, and deployment execution.
-"""
-import uuid
-import time
 from typing import List, Dict, Any
 import logging
 import os
+import uuid
+import time
 from google.cloud.aiplatform_v1 import IndexServiceClient
-from google.cloud.aiplatform_v1.types import (
-    IndexDatapoint,
-    UpsertDatapointsRequest
-)
+from google.cloud.aiplatform_v1.types import IndexDatapoint, UpsertDatapointsRequest
+
 from ..common.config import (
     PROJECT_ID,
     REGION,
@@ -30,8 +23,10 @@ class VectorStoreSetup:
 
     def __init__(self):
         """Initialize necessary managers and clients"""
+        self.project_id = PROJECT_ID
+        self.region = REGION
         self.firestore_manager = FirestoreManager()
-        self.index_manager = IndexManager(PROJECT_ID, REGION)
+        self.index_manager = IndexManager()
         self.logger = logging.getLogger(__name__)
 
     def process_texts(self, texts: List[Dict[str, str]]) -> Dict[str, Any]:
@@ -42,22 +37,24 @@ class VectorStoreSetup:
                 'filename' and 'content' keys.
 
         Returns:
-            Dictionary containing:
-                - data_point_ids: List of generated datapoint IDs
+            Dictionary containing processed information:
+                - datapoints: List of IndexDatapoint objects
+                - metadata_list: List of metadata for Firestore
                 - dimension: Dimension of the embeddings
 
         Raises:
-            GoogleAPIError: If datapoint creation fails
+            Exception: If text processing fails
         """
         try:
+            # Generate embeddings
+            self.logger.info("Generating embeddings...")
+            embeddings = embed_texts(texts)
+            dimension = len(embeddings[0])
+
             # Generate data point IDs
             data_point_ids = [str(uuid.uuid4()) for _ in texts]
 
-            # Generate embeddings
-            text_contents = [text_info['content'] for text_info in texts]
-            embeddings = embed_texts(texts)
-
-            # Create IndexDatapoints
+            # Create IndexDatapoints for Vector Search
             datapoints = [
                 IndexDatapoint(
                     datapoint_id=data_point_id,
@@ -66,71 +63,55 @@ class VectorStoreSetup:
                 for data_point_id, embedding in zip(data_point_ids, embeddings)
             ]
 
-            # Save metadata to Firestore
+            # Prepare metadata for Firestore
             metadata_list = [
                 {
                     'data_point_id': data_point_id,
-                    'text': text,
+                    'filename': text['filename'],
+                    'content': text['content'],
                     'additional_metadata': {
-                        'embedding_dimension': len(embeddings[0])
+                        'embedding_dimension': dimension
                     }
                 }
-                for data_point_id, text in zip(data_point_ids, text_contents)
+                for data_point_id, text in zip(data_point_ids, texts)
             ]
-            self.firestore_manager.batch_save_text_metadata(
-                FIRESTORE_COLLECTION,
-                metadata_list
-            )
-
-            # Get index name from the current operation's context
-            index_name = f"projects/{self.project_id}/locations/{self.region}/indexes/{INDEX_DISPLAY_NAME}"
-
-            # Create and execute upsert request
-            request = UpsertDatapointsRequest(
-                index=index_name,
-                datapoints=datapoints
-            )
-
-            # Create index client and upsert
-            client = IndexServiceClient()
-            client.upsert_datapoints(request=request)
 
             return {
-                'data_point_ids': data_point_ids,
-                'dimension': len(embeddings[0])
+                'datapoints': datapoints,
+                'metadata_list': metadata_list,
+                'dimension': dimension
             }
         except Exception as e:
             self.logger.error(f"Text processing error: {str(e)}")
             raise
 
-    def setup_vector_search(self,
-                            texts: List[Dict[str, str]]) -> None:
+    def setup_vector_search(self, texts: List[Dict[str, str]]) -> Dict[str, Any]:
         """Executes Vector Search environment setup
 
         Args:
             texts: List of texts to be used as initial data
 
         Returns:
-            None
+            Dictionary containing setup information:
+                - index_name: Name of the created index
+                - endpoint_name: Name of the created endpoint
+                - deployment_state: Final deployment state
 
         Raises:
-            Exception: If an error occurs during setup
+            Exception: If setup fails
         """
         start_time = time.time()
         try:
             self.logger.info("Starting Vector Search setup")
 
-            # Process texts
-            process_start = time.time()
+            # Process texts and generate embeddings
             process_result = self.process_texts(texts)
-            data_point_ids = process_result['data_point_ids']
-            embeddings = process_result['embeddings']
+            datapoints = process_result['datapoints']
+            metadata_list = process_result['metadata_list']
             dimension = process_result['dimension']
-            self.logger.info(f"Text processing time: {int(time.time() - process_start)} seconds")
 
             # Create index
-            self.logger.info("Start creating index")
-            index_start = time.time()
+            self.logger.info("Creating index...")
             index_op = self.index_manager.create_index(
                 display_name=INDEX_DISPLAY_NAME,
                 dimension=dimension,
@@ -138,24 +119,36 @@ class VectorStoreSetup:
             )
             index_result = self.index_manager.wait_for_operation(index_op)
             index_name = index_result.name
-            self.logger.info(f"Index created: {index_name}")
-            self.logger.info(f"Index creation time: {int(time.time() - index_start)} seconds")
 
             # Create endpoint
-            self.logger.info("Start creating endpoint")
-            endpoint_start = time.time()
+            self.logger.info("Creating endpoint...")
             endpoint_op = self.index_manager.create_endpoint(
                 display_name=ENDPOINT_DISPLAY_NAME,
                 description="RAG system vector search endpoint"
             )
             endpoint_result = self.index_manager.wait_for_operation(endpoint_op)
             endpoint_name = endpoint_result.name
-            self.logger.info(f"Endpoint created: {endpoint_name}")
-            self.logger.info(f"Endpoint creation time: {int(time.time() - endpoint_start)} seconds")
+
+            # Save metadata to Firestore
+            self.logger.info("Saving metadata to Firestore...")
+            self.firestore_manager.batch_save_text_metadata(
+                FIRESTORE_COLLECTION,
+                metadata_list
+            )
+
+            # Insert vectors into index
+            self.logger.info("Inserting vectors into index...")
+            request = UpsertDatapointsRequest(
+                index=index_name,
+                datapoints=datapoints
+            )
+            client = IndexServiceClient(client_options={
+                "api_endpoint": f"{self.region}-aiplatform.googleapis.com"
+            })
+            client.upsert_datapoints(request=request)
 
             # Deploy index
-            self.logger.info("Start deploying index")
-            deploy_start = time.time()
+            self.logger.info("Deploying index...")
             deploy_op = self.index_manager.deploy_index(
                 index_name=index_name,
                 endpoint_name=endpoint_name,
@@ -163,57 +156,37 @@ class VectorStoreSetup:
             )
             self.index_manager.wait_for_operation(deploy_op)
 
-            # Get endpoint information after deployment
-            endpoint_info = self.index_manager.endpoint_client.get_index_endpoint(
-                name=endpoint_name
-            )
-
-            deploy_time = int(time.time() - deploy_start)
-            self.logger.info("Index deployment completed")
-            self.logger.info(f"Deployment time: {deploy_time} seconds")
-            self.logger.info(f"Public endpoint: {endpoint_info.public_endpoint_domain_name}")
-
-            # Output deployed index information to logs
-            for deployed_index in endpoint_info.deployed_indexes:
-                if deployed_index.id == DEPLOYED_INDEX_ID:
-                    self.logger.info(f"Deployed index information:")
-                    self.logger.info(f"  ID: {deployed_index.id}")
-                    self.logger.info(f"  Creation time: {deployed_index.create_time}")
-                    self.logger.info(f"  Index path: {deployed_index.index}")
-                    break
-
-            # Check deployment status
-            state = self.index_manager.get_deployment_state(
+            # Get final deployment state
+            deployment_state = self.index_manager.get_deployment_state(
                 endpoint_name,
                 DEPLOYED_INDEX_ID
             )
-            if state['state'] == "DEPLOYED":
-                total_time = int(time.time() - start_time)
-                self.logger.info("Vector Search setup completed successfully")
-                self.logger.info(f"Total execution time: {total_time} seconds")
-                self.logger.info(f"Deployment information:")
-                self.logger.info(f"  Deployment group: {state['deployment_group']}")
-                self.logger.info(f"  Creation time: {state['create_time']}")
-                self.logger.info(f"  Index sync time: {state['index_sync_time']}")
-            else:
-                self.logger.error(f"Deployment issue detected: {state}")
-                raise RuntimeError(f"Deployment failed with state: {state['state']}")
+
+            if deployment_state['state'] != "DEPLOYED":
+                raise RuntimeError(f"Deployment failed with state: {deployment_state['state']}")
+
+            total_time = int(time.time() - start_time)
+            self.logger.info(f"Vector Search setup completed successfully in {total_time} seconds")
+
+            return {
+                'index_name': index_name,
+                'endpoint_name': endpoint_name,
+                'deployment_state': deployment_state
+            }
 
         except Exception as e:
             total_time = int(time.time() - start_time)
-            self.logger.error(f"Vector Search setup error: {str(e)}")
-            self.logger.error(f"Execution time until error: {total_time} seconds")
+            self.logger.error(f"Vector Search setup failed after {total_time} seconds: {str(e)}")
             raise
 
 def load_md_files(md_folder_path: str) -> List[Dict[str, str]]:
-    """Loads information from MD files and returns it as a list of dictionaries
+    """Loads information from MD files
 
     Args:
-        md_folder_path: Path to the folder containing the MD files
+        md_folder_path: Path to the folder containing MD files
 
     Returns:
-        List of dictionaries containing MD file information
-        Each dictionary has the filename (without extension) as the key and the file content as the value
+        List of dictionaries containing file information
     """
     md_files_info = []
     for filename in os.listdir(md_folder_path):
@@ -221,36 +194,46 @@ def load_md_files(md_folder_path: str) -> List[Dict[str, str]]:
             file_path = os.path.join(md_folder_path, filename)
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            md_files_info.append({'filename': filename, 'content': content})
+            md_files_info.append({
+                'filename': filename,
+                'content': content
+            })
     return md_files_info
 
-def main():
-    """Main execution function"""
-    # Log settings
+def setup_logging():
+    """Configure logging settings"""
     log_dir = 'app/log'
     os.makedirs(log_dir, exist_ok=True)
     log_filename = os.path.join(log_dir, 'vector_store_setup.log')
+
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(log_filename, mode='w')  # Overwrite each time with 'w' mode
+            logging.FileHandler(log_filename, mode='w')
         ]
     )
+
+def main():
+    """Main execution function"""
+    setup_logging()
     logger = logging.getLogger(__name__)
 
-    # Path to the folder containing MD files
-    md_folder_path = os.path.join(os.path.dirname(__file__), "md")
-
     try:
-        # Load information from MD files
+        md_folder_path = os.path.join(os.path.dirname(__file__), "md")
         md_files_info = load_md_files(md_folder_path)
 
         setup = VectorStoreSetup()
-        setup.setup_vector_search(md_files_info)
+        result = setup.setup_vector_search(md_files_info)
+
+        logger.info("Setup completed successfully")
+        logger.info(f"Index name: {result['index_name']}")
+        logger.info(f"Endpoint name: {result['endpoint_name']}")
+        logger.info(f"Deployment state: {result['deployment_state']}")
+
     except Exception as e:
-        logger.error(f"Execution error: {str(e)}")
+        logger.error(f"Setup failed: {str(e)}")
         raise
 
 if __name__ == "__main__":

@@ -22,7 +22,6 @@ from ..common.config import (
     FIRESTORE_COLLECTION
 )
 from ..common.utils.embeddings import embed_texts
-from ..common.utils.vector_search import VectorSearchClient
 from .utils.firestore_ops import FirestoreManager
 from .utils.index_manager import IndexManager
 
@@ -188,18 +187,7 @@ class VectorStoreSetup:
                 endpoint_name,
                 DEPLOYED_INDEX_ID
             )
-
             if state['state'] == "DEPLOYED":
-                # Upsert data points to the index after successful deployment
-                self.logger.info("Start upserting data points to the index")
-                vector_search_client = VectorSearchClient(PROJECT_ID, REGION, endpoint_info)
-                data_points = [
-                    {'id': data_point_id, 'embedding': embedding}
-                    for data_point_id, embedding in zip(data_point_ids, embeddings)
-                ]
-                vector_search_client.upsert_data_points(DEPLOYED_INDEX_ID, data_points)
-                self.logger.info("Data points upserted to the index")
-
                 total_time = int(time.time() - start_time)
                 self.logger.info("Vector Search setup completed successfully")
                 self.logger.info(f"Total execution time: {total_time} seconds")

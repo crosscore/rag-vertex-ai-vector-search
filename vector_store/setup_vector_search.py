@@ -8,6 +8,11 @@ import time
 from typing import List, Dict, Any
 import logging
 import os
+from google.cloud.aiplatform_v1 import IndexServiceClient
+from google.cloud.aiplatform_v1.types import (
+    IndexDatapoint,
+    UpsertDatapointsRequest
+)
 from ..common.config import (
     PROJECT_ID,
     REGION,
@@ -30,18 +35,20 @@ class VectorStoreSetup:
         self.index_manager = IndexManager(PROJECT_ID, REGION)
         self.logger = logging.getLogger(__name__)
 
-    def process_texts(self,
-                        texts: List[Dict[str, str]]) -> Dict[str, Any]:
-        """Processes texts and stores metadata
+    def process_texts(self, texts: List[Dict[str, str]]) -> Dict[str, Any]:
+        """Process texts to generate embeddings and create datapoints
 
         Args:
-            texts: List of texts to be processed
+            texts: List of texts to process. Each element should be a dictionary with
+                'filename' and 'content' keys.
 
         Returns:
-            Dictionary containing processing results
+            Dictionary containing:
+                - data_point_ids: List of generated datapoint IDs
+                - dimension: Dimension of the embeddings
 
         Raises:
-            Exception: If an error occurs during processing
+            GoogleAPIError: If datapoint creation fails
         """
         try:
             # Generate data point IDs
@@ -49,19 +56,24 @@ class VectorStoreSetup:
 
             # Generate embeddings
             text_contents = [text_info['content'] for text_info in texts]
-            self.logger.info("Start generating embeddings")
             embeddings = embed_texts(texts)
-            embedding_dimension = len(embeddings[0])
-            self.logger.info(f"Embeddings generated: {len(embeddings)} items, dimension: {embedding_dimension}")
+
+            # Create IndexDatapoints
+            datapoints = [
+                IndexDatapoint(
+                    datapoint_id=data_point_id,
+                    feature_vector=embedding
+                )
+                for data_point_id, embedding in zip(data_point_ids, embeddings)
+            ]
 
             # Save metadata to Firestore
-            self.logger.info("Start saving metadata to Firestore")
             metadata_list = [
                 {
                     'data_point_id': data_point_id,
                     'text': text,
                     'additional_metadata': {
-                        'embedding_dimension': embedding_dimension
+                        'embedding_dimension': len(embeddings[0])
                     }
                 }
                 for data_point_id, text in zip(data_point_ids, text_contents)
@@ -70,14 +82,24 @@ class VectorStoreSetup:
                 FIRESTORE_COLLECTION,
                 metadata_list
             )
-            self.logger.info("Metadata saved")
+
+            # Get index name from the current operation's context
+            index_name = f"projects/{self.project_id}/locations/{self.region}/indexes/{INDEX_DISPLAY_NAME}"
+
+            # Create and execute upsert request
+            request = UpsertDatapointsRequest(
+                index=index_name,
+                datapoints=datapoints
+            )
+
+            # Create index client and upsert
+            client = IndexServiceClient()
+            client.upsert_datapoints(request=request)
 
             return {
                 'data_point_ids': data_point_ids,
-                'embeddings': embeddings,
-                'dimension': embedding_dimension
+                'dimension': len(embeddings[0])
             }
-
         except Exception as e:
             self.logger.error(f"Text processing error: {str(e)}")
             raise

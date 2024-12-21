@@ -49,9 +49,9 @@ app/
 #### setup_vector_search.py
 
 -   Vector Store 設定のメインスクリプト
--   全体のセットアッププロセスを統合
+-   全体のセットアッププロセスを統合（インデックス作成、デプロイ、データ登録）
 -   実行エントリーポイント
--   インデックス作成・デプロイ後、`data_point_id` と `embedding`をインデックスに追加
+-   メタデータをFirestoreに保存し、ベクトルデータをVector Searchに格納
 
 #### utils/firestore_ops.py
 

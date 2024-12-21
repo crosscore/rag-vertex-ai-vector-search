@@ -1,143 +1,118 @@
 # app/common/utils/vector_search.py
-"""
-Module that provides basic functions for Vector Search operations.
-Implements basic operations such as search, add, and delete data.
-"""
-from google.cloud import aiplatform
-from google.api_core.exceptions import GoogleAPIError
+"""Module for handling vector search operations using Vertex AI Matching Engine."""
+
 from typing import List, Dict, Any, Optional
 import logging
-from ...common.utils.embeddings import embed_texts
-from ...common.config import EMBEDDING_MODEL
+import google.auth
+from google.api_core import exceptions as core_exceptions
+from google.cloud import aiplatform
+from google.cloud.aiplatform.matching_engine import (
+    MatchingEngineIndexEndpoint,
+    MatchNeighbor,
+)
 
 logger = logging.getLogger(__name__)
 
 class VectorSearchClient:
-    """Client class that manages Vector Search operations"""
+    """Client class for vector similarity search operations"""
 
-    def __init__(self,
-                    project_id: str,
-                    location: str,
-                    index_endpoint: aiplatform.MatchingEngineIndexEndpoint):
-        """
-        Args:
-            project_id: Project ID
-            location: Region
-            index_endpoint: Index endpoint to use
-        """
-        self.project_id = project_id
-        self.location = location
-        self.index_endpoint = index_endpoint
-        aiplatform.init(project=project_id, location=location)
+    def __init__(
+        self,
+        project_id: str,
+        location: str,
+        endpoint_name: str,
+    ):
+        """Initialize VectorSearchClient.
 
-    def upsert_data_points(self,
-                            deployed_index_id: str,
-                            data_points: List[Dict[str, Any]]) -> None:
-        """Add or update data points in the index
         Args:
-            deployed_index_id: ID of the deployed index
-            data_points: List of data points to add or update
-                        Each data point is in the format {'id': str, 'embedding': List[float]}
+            project_id (str): Google Cloud project ID
+            location (str): Google Cloud region
+            endpoint_name (str): Full resource name of the endpoint or endpoint ID
         """
         try:
-            logger.info(f"Start updating {len(data_points)} data points")
-            self.index_endpoint.upsert_datapoints(
-                deployed_index_id=deployed_index_id,
-                datapoints=data_points
+            self.credentials, _ = google.auth.default()
+            self.project_id = project_id
+            self.location = location
+
+            # Initialize Vertex AI
+            aiplatform.init(project=project_id, location=location)
+
+            # Get the endpoint
+            self.endpoint = MatchingEngineIndexEndpoint(
+                index_endpoint_name=endpoint_name,
+                project=project_id,
+                location=location,
             )
-            logger.info("Data points update completed")
-        except GoogleAPIError as e:
-            logger.error(f"Data points update error: {str(e)}")
+            logger.info(f"Successfully initialized VectorSearchClient with endpoint: {endpoint_name}")
+
+        except core_exceptions.GoogleAPIError as e:
+            logger.error(f"Failed to initialize VectorSearchClient: {str(e)}")
             raise
 
-    def remove_data_points(self,
-                            deployed_index_id: str,
-                            ids: List[str]) -> None:
-        """Remove data points from the index
-        Args:
-            deployed_index_id: ID of the deployed index
-            ids: List of IDs of data points to remove
-        """
-        try:
-            logger.info(f"Start deleting {len(ids)} data points")
-            self.index_endpoint.remove_datapoints(
-                deployed_index_id=deployed_index_id,
-                datapoint_ids=ids
-            )
-            logger.info("Data points deletion completed")
-        except GoogleAPIError as e:
-            logger.error(f"Data points deletion error: {str(e)}")
-            raise
+    def find_neighbors(
+        self,
+        deployed_index_id: str,
+        queries: List[List[float]],
+        num_neighbors: int = 10,
+        filter_expr: Optional[str] = None,
+    ) -> List[List[MatchNeighbor]]:
+        """Search for nearest neighbors.
 
-    def search(self,
-                deployed_index_id: str,
-                query: str,
-                num_neighbors: int = 5,
-                filter_expr: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Search for data points similar to the query
         Args:
-            deployed_index_id: ID of the deployed index
-            query: Search query string
-            num_neighbors: Number of neighbors to retrieve
-            filter_expr: Filter expression (optional)
+            deployed_index_id (str): ID of the deployed index
+            queries (List[List[float]]): List of query vectors
+            num_neighbors (int, optional): Number of neighbors to return. Defaults to 10.
+            filter_expr (Optional[str]): Filter expression for results
 
         Returns:
-            List of search results. Each element is of the form:
-            {
-                'id': Data point ID,
-                'distance': Similarity score,
-                'neighbor_count': Number of neighbors
-            }
+            List[List[MatchNeighbor]]: List of nearest neighbors for each query
+
+        Raises:
+            core_exceptions.GoogleAPIError: If search operation fails
         """
         try:
-            # Generate embedding of the query
-            query_embedding = embed_texts([{'filename': 'query', 'content': query}], EMBEDDING_MODEL)[0]
-            logger.info(f"Search query embedding generated: {len(query_embedding)} dimensions")
-
-            # Execute nearest neighbor search
-            response = self.index_endpoint.find_neighbors(
+            results = self.endpoint.find_neighbors(
                 deployed_index_id=deployed_index_id,
-                queries=[query_embedding],
+                queries=queries,
                 num_neighbors=num_neighbors,
-                filter=filter_expr
             )
-
-            # Format the response
-            results = []
-            for neighbor in response[0].nearest_neighbors:
-                results.append({
-                    'id': neighbor.id,
-                    'distance': neighbor.distance,
-                    'neighbor_count': len(response[0].nearest_neighbors)
-                })
-
-            logger.info(f"Search completed: {len(results)} results found")
+            logger.info(f"Successfully found {len(results)} results")
             return results
 
-        except GoogleAPIError as e:
-            logger.error(f"Search execution error: {str(e)}")
-            raise
-        except Exception as e:
-            logger.error(f"Unexpected error: {str(e)}")
+        except core_exceptions.GoogleAPIError as e:
+            logger.error(f"Search operation failed: {str(e)}")
             raise
 
-    def get_index_stats(self, deployed_index_id: str) -> Dict[str, Any]:
-        """Get index statistics
+    def get_datapoints(
+        self,
+        deployed_index_id: str,
+        datapoint_ids: List[str],
+    ) -> List[Dict[str, Any]]:
+        """Retrieve specific datapoints by their IDs.
 
         Args:
-            deployed_index_id: ID of the deployed index
+            deployed_index_id (str): ID of the deployed index
+            datapoint_ids (List[str]): List of datapoint IDs to retrieve
 
         Returns:
-            Dictionary containing statistics
+            List[Dict[str, Any]]: Retrieved datapoints
+
+        Raises:
+            core_exceptions.GoogleAPIError: If retrieval operation fails
         """
         try:
-            stats = self.index_endpoint.get_index_stats(deployed_index_id)
-            logger.info(f"Index statistics retrieved: {deployed_index_id}")
-            return {
-                'total_data_points': stats.total_data_points,
-                'updated_at': stats.updated_at,
-                'deployed_index_id': deployed_index_id
-            }
-        except GoogleAPIError as e:
-            logger.error(f"Statistics retrieval error: {str(e)}")
+            datapoints = self.endpoint.read_index_datapoints(
+                deployed_index_id=deployed_index_id,
+                ids=datapoint_ids,
+            )
+            return [
+                {
+                    'id': dp.datapoint_id,
+                    'vector': dp.feature_vector,
+                }
+                for dp in datapoints
+            ]
+
+        except core_exceptions.GoogleAPIError as e:
+            logger.error(f"Failed to retrieve datapoints: {str(e)}")
             raise

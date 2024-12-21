@@ -197,7 +197,7 @@ def load_md_files(md_folder_path: str) -> List[Dict[str, str]]:
             file_path = os.path.join(md_folder_path, filename)
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            md_files_info.append({filename[:-3]: content})
+            md_files_info.append({'filename': filename, 'content': content})
     return md_files_info
 
 def main():
@@ -209,11 +209,8 @@ def main():
         # MDファイルから情報を読み込む
         md_files_info = load_md_files(md_folder_path)
 
-        # 各MDファイルの内容をリストにまとめる
-        texts = [list(md_info.values())[0] for md_info in md_files_info]
-
         setup = VectorStoreSetup()
-        setup.setup_vector_search(texts)
+        setup.setup_vector_search(md_files_info)
     except Exception as e:
         logger.error(f"実行エラー: {str(e)}")
         raise

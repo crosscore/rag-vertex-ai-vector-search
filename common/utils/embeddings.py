@@ -1,28 +1,24 @@
 # app/common/utils/embeddings.py
-
 """
 テキストのembedding生成を担当するモジュール。
 トークン検証とembedding生成の機能を提供する。
 """
-
 from vertexai.language_models import TextEmbeddingModel
 import tiktoken
-from typing import List
+from typing import List, Dict
 import logging
 from ...common.config import (
     EMBEDDING_MODEL,
     MAX_TOKENS_PER_TEXT,
-    MAX_TOTAL_TOKENS
 )
 
-# ロガーの設定
 logger = logging.getLogger(__name__)
 
-def validate_token_count(texts: List[str]) -> None:
-    """入力テキストのトークン数を検証する
+def validate_token_count_per_text(text_info_list: List[Dict[str, str]]) -> None:
+    """入力テキストのトークン数を検証する (各テキスト単位)
 
     Args:
-        texts: 検証対象のテキストリスト
+        text_info_list: 検証対象のテキスト情報リスト。各要素は {'filename': 'ファイル名', 'content': 'テキスト内容'} の辞書。
 
     Raises:
         ValueError: トークン数が制限を超えている場合
@@ -30,20 +26,19 @@ def validate_token_count(texts: List[str]) -> None:
     encoding = tiktoken.get_encoding("cl100k_base")
 
     total_tokens = 0
-    for text in texts:
+    for text_info in text_info_list:
+        filename = text_info['filename']
+        text = text_info['content']
         num_tokens = len(encoding.encode(text))
+        logger.info(f"{filename} のトークン数: {num_tokens}")
         if num_tokens > MAX_TOKENS_PER_TEXT:
             raise ValueError(
                 f"テキストのトークン数が制限を超えています。制限: {MAX_TOKENS_PER_TEXT}, "
-                f"実際: {num_tokens}, テキスト先頭: '{text[:50]}...'"
+                f"実際: {num_tokens}, ファイル: {filename}, テキスト先頭: '{text[:50]}...'"
             )
         total_tokens += num_tokens
 
-    if total_tokens > MAX_TOTAL_TOKENS:
-        raise ValueError(
-            f"全テキストの合計トークン数が制限を超えています。制限: {MAX_TOTAL_TOKENS}, "
-            f"実際: {total_tokens}"
-        )
+    logger.info(f"全テキストの合計トークン数: {total_tokens}")
 
 def embed_single_text(text: str, model: TextEmbeddingModel) -> List[float]:
     """単一のテキストをembeddingに変換する
@@ -54,9 +49,6 @@ def embed_single_text(text: str, model: TextEmbeddingModel) -> List[float]:
 
     Returns:
         embedding値のリスト
-
-    Raises:
-        Exception: embedding生成に失敗した場合
     """
     try:
         embedding = model.get_embeddings([text])[0]
@@ -65,35 +57,36 @@ def embed_single_text(text: str, model: TextEmbeddingModel) -> List[float]:
         logger.error(f"Embedding生成エラー - テキスト: '{text[:50]}...': {str(e)}")
         raise
 
-def embed_texts(texts: List[str], model_name: str = EMBEDDING_MODEL) -> List[List[float]]:
+def embed_texts(text_info_list: List[Dict[str, str]], model_name: str = EMBEDDING_MODEL) -> List[List[float]]:
     """複数のテキストをembeddingに変換する
 
     Args:
-        texts: 変換対象のテキストリスト
+        text_info_list: 変換対象のテキスト情報リスト。各要素は {'filename': 'ファイル名', 'content': 'テキスト内容'} の辞書。
         model_name: 使用するembeddingモデルの名前
 
     Returns:
         embedding値のリストのリスト
-
-    Raises:
-        ValueError: トークン数の検証に失敗した場合
-        Exception: embedding生成に失敗した場合
     """
     try:
-        # トークン数の検証
-        validate_token_count(texts)
+        # トークン数の検証 (各テキスト単位)
+        validate_token_count_per_text(text_info_list)
 
         # モデルの初期化
         model = TextEmbeddingModel.from_pretrained(model_name)
 
-        # バッチ処理でembedding生成
-        logger.info(f"{len(texts)}件のテキストのembedding生成を開始")
-        embeddings = model.get_embeddings(texts)
+        # 結果を格納するリスト
+        result = []
 
-        # 結果を変換
-        result = [embedding.values for embedding in embeddings]
-        logger.info(f"embedding生成完了: {len(result)}件")
+        # 各テキストを個別に処理
+        for text_info in text_info_list:
+            filename = text_info['filename']
+            text = text_info['content']
+            logger.info(f"{filename} のembedding生成を開始: '{text[:50]}...'")
+            embedding = model.get_embeddings([text])[0]  # 各テキストを個別にベクトル化
+            result.append(embedding.values)
+            logger.info(f"{filename} のembedding生成完了: {len(embedding.values)}次元")
 
+        logger.info(f"合計 {len(result)}件のembedding生成完了")
         return result
 
     except ValueError as ve:
@@ -104,17 +97,6 @@ def embed_texts(texts: List[str], model_name: str = EMBEDDING_MODEL) -> List[Lis
         raise
 
 def get_embedding_dimension(model_name: str = EMBEDDING_MODEL) -> int:
-    """指定されたモデルのembeddingの次元数を取得する
-
-    Args:
-        model_name: embeddingモデルの名前
-
-    Returns:
-        embedding次元数
-
-    Note:
-        この関数は、モデルのサンプル出力から次元数を動的に取得します
-    """
     model = TextEmbeddingModel.from_pretrained(model_name)
     sample_embedding = model.get_embeddings(["test"])[0]
     return len(sample_embedding.values)

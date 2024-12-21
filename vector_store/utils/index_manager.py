@@ -1,14 +1,9 @@
 # app/vector_store/utils/index_manager.py
-"""
-Module responsible for managing Vector Search indexes.
-Provides functions for index creation, deployment, monitoring, etc.
-"""
-from google.cloud import aiplatform
 from google.cloud.aiplatform_v1 import (
     IndexServiceClient,
     IndexEndpointServiceClient,
     Index,
-    IndexEndpoint
+    IndexEndpoint,
 )
 from google.cloud.aiplatform_v1.types import Index
 from google.api_core.exceptions import GoogleAPIError
@@ -28,10 +23,11 @@ from ...common.config import (
 logger = logging.getLogger(__name__)
 
 class IndexManager:
-    """Class to manage Vector Search indexes"""
+    """Class to manage Vector Search indexes using low-level Vertex AI API"""
 
     def __init__(self, project_id: str = PROJECT_ID, region: str = REGION):
-        """
+        """Initialize the Index Manager
+
         Args:
             project_id: Project ID
             region: Region
@@ -40,13 +36,10 @@ class IndexManager:
         self.region = region
         self.parent = f"projects/{project_id}/locations/{region}"
 
-        # Initialize API clients
+        # Initialize clients with proper endpoint configuration
         client_options = {"api_endpoint": f"{region}-aiplatform.googleapis.com"}
         self.index_client = IndexServiceClient(client_options=client_options)
         self.endpoint_client = IndexEndpointServiceClient(client_options=client_options)
-
-        # Initialize Vertex AI
-        aiplatform.init(project=project_id, location=region)
 
     def create_index(self,
                     display_name: str,
@@ -60,7 +53,7 @@ class IndexManager:
             description: Description of the index (optional)
 
         Returns:
-            Operation of the creation process
+            Operation: The long-running operation for index creation
 
         Raises:
             GoogleAPIError: If index creation fails
@@ -70,11 +63,15 @@ class IndexManager:
             config = INDEX_CONFIG.copy()
             config['dimensions'] = dimension
 
+            # Create index with StreamUpdate enabled
             index = Index(
                 display_name=display_name,
                 description=description or f"Vector search index created at {time.strftime('%Y-%m-%d %H:%M:%S')}",
                 metadata_schema_uri="gs://google-cloud-aiplatform/schema/matchingengine/metadata/nearest_neighbor_search_1.0.0.yaml",
-                metadata={"config": config}
+                metadata={
+                    "config": config
+                },
+                index_update_method=Index.IndexUpdateMethod.STREAM_UPDATE
             )
 
             # Execute index creation operation
@@ -87,8 +84,9 @@ class IndexManager:
             return operation
 
         except GoogleAPIError as e:
-            logger.error(f"Index creation error: {str(e)}")
-            raise
+            error_msg = f"Failed to create index: {str(e)}"
+            logger.error(error_msg)
+            raise GoogleAPIError(error_msg) from e
 
     def create_endpoint(self,
                         display_name: str,
@@ -100,7 +98,7 @@ class IndexManager:
             description: Description of the endpoint (optional)
 
         Returns:
-            Operation of the creation process
+            Operation: The long-running operation for endpoint creation
 
         Raises:
             GoogleAPIError: If endpoint creation fails
@@ -121,8 +119,9 @@ class IndexManager:
             return operation
 
         except GoogleAPIError as e:
-            logger.error(f"Endpoint creation error: {str(e)}")
-            raise
+            error_msg = f"Failed to create endpoint: {str(e)}"
+            logger.error(error_msg)
+            raise GoogleAPIError(error_msg) from e
 
     def deploy_index(self,
                     index_name: str,
@@ -133,10 +132,10 @@ class IndexManager:
         Args:
             index_name: Name of the index to deploy
             endpoint_name: Name of the endpoint to deploy to
-            deployed_index_id: ID of the deployed index
+            deployed_index_id: ID for the deployed index
 
         Returns:
-            Operation of the deployment process
+            Operation: The long-running operation for index deployment
 
         Raises:
             GoogleAPIError: If deployment fails
@@ -157,12 +156,13 @@ class IndexManager:
             return operation
 
         except GoogleAPIError as e:
-            logger.error(f"Index deployment error: {str(e)}")
-            raise
+            error_msg = f"Failed to deploy index: {str(e)}"
+            logger.error(error_msg)
+            raise GoogleAPIError(error_msg) from e
 
     def wait_for_operation(self,
                             operation: Operation,
-                            timeout_minutes: int = DEPLOYMENT_TIMEOUT_MINUTES) -> Index:
+                            timeout_minutes: int = DEPLOYMENT_TIMEOUT_MINUTES) -> Any:
         """Wait for the operation to complete
 
         Args:
@@ -170,7 +170,7 @@ class IndexManager:
             timeout_minutes: Timeout in minutes
 
         Returns:
-            Result of the operation
+            Any: Result of the operation
 
         Raises:
             TimeoutError: If the operation does not complete within the specified time
@@ -180,18 +180,21 @@ class IndexManager:
             start_time = time.time()
             while True:
                 if operation.done():
-                    logger.info("Operation completed")
+                    logger.info("Operation completed successfully")
                     return operation.result()
 
                 if time.time() - start_time > timeout_minutes * 60:
-                    raise TimeoutError(f"Operation timed out: {timeout_minutes} minutes")
+                    error_msg = f"Operation timed out after {timeout_minutes} minutes"
+                    logger.error(error_msg)
+                    raise TimeoutError(error_msg)
 
                 logger.debug("Waiting for operation to complete...")
                 time.sleep(DEPLOYMENT_CHECK_INTERVAL)
 
         except GoogleAPIError as e:
-            logger.error(f"Error while waiting for operation: {str(e)}")
-            raise
+            error_msg = f"Operation failed: {str(e)}"
+            logger.error(error_msg)
+            raise GoogleAPIError(error_msg) from e
 
     def get_deployment_state(self,
                             endpoint_name: str,
@@ -199,11 +202,11 @@ class IndexManager:
         """Get the deployment state
 
         Args:
-            endpoint_name: Endpoint name
-            deployed_index_id: Deployed index ID
+            endpoint_name: Name of the endpoint
+            deployed_index_id: ID of the deployed index
 
         Returns:
-            Dictionary containing deployment state information
+            Dict[str, Any]: Dictionary containing deployment state information
 
         Raises:
             GoogleAPIError: If state retrieval fails
@@ -213,7 +216,7 @@ class IndexManager:
 
             for deployed_index in endpoint.deployed_indexes:
                 if deployed_index.id == deployed_index_id:
-                    # Check for the existence of index_sync_time to determine deployment state
+                    # Check index_sync_time to determine deployment state
                     is_synced = hasattr(deployed_index, 'index_sync_time')
 
                     state = {
@@ -222,12 +225,13 @@ class IndexManager:
                         "create_time": deployed_index.create_time,
                         "index_sync_time": getattr(deployed_index, 'index_sync_time', None)
                     }
-                    logger.info(f"Deployment state: {state}")
+                    logger.info(f"Deployment state retrieved: {state}")
                     return state
 
             logger.warning(f"Deployed index not found: {deployed_index_id}")
             return {"state": "NOT_FOUND"}
 
         except GoogleAPIError as e:
-            logger.error(f"Deployment state retrieval error: {str(e)}")
-            raise
+            error_msg = f"Failed to get deployment state: {str(e)}"
+            logger.error(error_msg)
+            raise GoogleAPIError(error_msg) from e

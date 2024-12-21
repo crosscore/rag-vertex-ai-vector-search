@@ -1,11 +1,11 @@
+# app/vector_store/setup_vector_search.py
 from typing import List, Dict, Any
 import logging
 import os
 import uuid
 from datetime import datetime
 import time
-from google.cloud.aiplatform_v1 import IndexServiceClient
-from google.cloud.aiplatform_v1.types import IndexDatapoint, UpsertDatapointsRequest
+from google.cloud.aiplatform_v1 import IndexDatapoint
 
 from ..common.config import (
     PROJECT_ID,
@@ -23,7 +23,7 @@ class VectorStoreSetup:
     """Class to manage Vector Store setup execution"""
 
     def __init__(self):
-        """Initialize necessary managers and clients"""
+        """Initialize necessary managers"""
         self.project_id = PROJECT_ID
         self.region = REGION
         self.firestore_manager = FirestoreManager()
@@ -31,19 +31,34 @@ class VectorStoreSetup:
         self.logger = logging.getLogger(__name__)
 
     def process_texts(self, texts: List[Dict[str, str]]) -> Dict[str, Any]:
-        """Process texts to generate embeddings and create datapoints"""
+        """Process texts to generate embeddings and create datapoints
+
+        Args:
+            texts: List of texts to process. Each text should be a dictionary with
+                    'filename' and 'content' keys.
+
+        Returns:
+            Dictionary containing:
+                - datapoints: List of IndexDatapoint objects
+                - metadata_list: List of metadata dictionaries
+                - dimension: Dimension of the embeddings
+
+        Raises:
+            Exception: If text processing fails
+        """
         try:
             # Generate embeddings
             embeddings = embed_texts(texts)
             dimension = len(embeddings[0])
+            self.logger.info(f"Generated embeddings with dimension: {dimension}")
 
-            # Generate data point IDs
+            # Generate unique IDs for data points
             data_point_ids = [str(uuid.uuid4()) for _ in texts]
 
-            # Create IndexDatapoints with enhanced metadata
+            # Create IndexDatapoints with metadata
             datapoints = []
             for data_point_id, embedding, text in zip(data_point_ids, embeddings, texts):
-                # 基本的な制限（ファイルタイプとコンテンツタイプ）
+                # Create restrictions for filtering
                 file_restrict = IndexDatapoint.Restriction(
                     namespace="file_type",
                     allow_list=["markdown"]
@@ -53,7 +68,7 @@ class VectorStoreSetup:
                     allow_list=["documentation"]
                 )
 
-                # 数値ベースの制限（埋め込みの次元とコンテンツ長）
+                # Add numeric restrictions
                 dimension_restrict = IndexDatapoint.NumericRestriction(
                     namespace="embedding_dimension",
                     value_int=dimension
@@ -63,12 +78,12 @@ class VectorStoreSetup:
                     value_int=len(text['content'])
                 )
 
-                # クラウディングタグ（ファイル名ベース）
+                # Add crowding tag based on filename
                 crowding = IndexDatapoint.CrowdingTag(
                     crowding_attribute=text['filename']
                 )
 
-                # データポイントの作成
+                # Create datapoint with all metadata
                 datapoint = IndexDatapoint(
                     datapoint_id=data_point_id,
                     feature_vector=embedding,
@@ -78,7 +93,7 @@ class VectorStoreSetup:
                 )
                 datapoints.append(datapoint)
 
-            # Firestoreのメタデータを拡張
+            # Prepare metadata for Firestore
             metadata_list = [
                 {
                     'data_point_id': data_point_id,
@@ -95,6 +110,7 @@ class VectorStoreSetup:
                 for data_point_id, text in zip(data_point_ids, texts)
             ]
 
+            self.logger.info(f"Processed {len(texts)} texts successfully")
             return {
                 'datapoints': datapoints,
                 'metadata_list': metadata_list,
@@ -102,14 +118,16 @@ class VectorStoreSetup:
             }
 
         except Exception as e:
-            self.logger.error(f"Text processing error: {str(e)}")
-            raise
+            error_msg = f"Text processing error: {str(e)}"
+            self.logger.error(error_msg)
+            raise Exception(error_msg) from e
 
     def setup_vector_search(self, texts: List[Dict[str, str]]) -> Dict[str, Any]:
-        """Executes Vector Search environment setup
+        """Execute Vector Search environment setup
 
         Args:
-            texts: List of texts to be used as initial data
+            texts: List of texts to be used as initial data. Each text should be a
+                    dictionary with 'filename' and 'content' keys.
 
         Returns:
             Dictionary containing setup information:
@@ -131,7 +149,7 @@ class VectorStoreSetup:
             dimension = process_result['dimension']
 
             # Create index
-            self.logger.info("Creating index...")
+            self.logger.info(f"Creating index: {INDEX_DISPLAY_NAME}")
             index_op = self.index_manager.create_index(
                 display_name=INDEX_DISPLAY_NAME,
                 dimension=dimension,
@@ -139,15 +157,17 @@ class VectorStoreSetup:
             )
             index_result = self.index_manager.wait_for_operation(index_op)
             index_name = index_result.name
+            self.logger.info(f"Index created: {index_name}")
 
             # Create endpoint
-            self.logger.info("Creating endpoint...")
+            self.logger.info(f"Creating endpoint: {ENDPOINT_DISPLAY_NAME}")
             endpoint_op = self.index_manager.create_endpoint(
                 display_name=ENDPOINT_DISPLAY_NAME,
                 description="RAG system vector search endpoint"
             )
             endpoint_result = self.index_manager.wait_for_operation(endpoint_op)
             endpoint_name = endpoint_result.name
+            self.logger.info(f"Endpoint created: {endpoint_name}")
 
             # Save metadata to Firestore
             self.logger.info("Saving metadata to Firestore...")
@@ -158,14 +178,11 @@ class VectorStoreSetup:
 
             # Insert vectors into index
             self.logger.info("Inserting vectors into index...")
-            request = UpsertDatapointsRequest(
-                index=index_name,
-                datapoints=datapoints
-            )
-            client = IndexServiceClient(client_options={
-                "api_endpoint": f"{self.region}-aiplatform.googleapis.com"
-            })
-            client.upsert_datapoints(request=request)
+            request = {
+                "index": index_name,
+                "datapoints": datapoints
+            }
+            self.index_manager.index_client.upsert_datapoints(request=request)
 
             # Deploy index
             self.logger.info("Deploying index...")
@@ -196,42 +213,65 @@ class VectorStoreSetup:
 
         except Exception as e:
             total_time = int(time.time() - start_time)
-            self.logger.error(f"Vector Search setup failed after {total_time} seconds: {str(e)}")
-            raise
+            error_msg = f"Vector Search setup failed after {total_time} seconds: {str(e)}"
+            self.logger.error(error_msg)
+            raise Exception(error_msg) from e
 
 def load_md_files(md_folder_path: str) -> List[Dict[str, str]]:
-    """Loads information from MD files
+    """Load information from MD files
 
     Args:
         md_folder_path: Path to the folder containing MD files
 
     Returns:
         List of dictionaries containing file information
+
+    Raises:
+        Exception: If file loading fails
     """
-    md_files_info = []
-    for filename in os.listdir(md_folder_path):
-        if filename.endswith(".md"):
-            file_path = os.path.join(md_folder_path, filename)
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            md_files_info.append({
-                'filename': filename,
-                'content': content
-            })
-    return md_files_info
+    try:
+        if not os.path.exists(md_folder_path):
+            raise FileNotFoundError(f"MD folder not found: {md_folder_path}")
+
+        md_files_info = []
+        for filename in os.listdir(md_folder_path):
+            if filename.endswith(".md"):
+                file_path = os.path.join(md_folder_path, filename)
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    md_files_info.append({
+                        'filename': filename,
+                        'content': content
+                    })
+                except Exception as e:
+                    logging.error(f"Error reading file {filename}: {str(e)}")
+                    raise
+
+        if not md_files_info:
+            raise ValueError("No MD files found in the specified directory")
+
+        return md_files_info
+
+    except Exception as e:
+        error_msg = f"Error loading MD files: {str(e)}"
+        logging.error(error_msg)
+        raise Exception(error_msg) from e
 
 def setup_logging():
     """Configure logging settings"""
     log_dir = 'app/log'
     os.makedirs(log_dir, exist_ok=True)
-    log_filename = os.path.join(log_dir, 'vector_store_setup.log')
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_filename = os.path.join(log_dir, f'vector_store_setup_{timestamp}.log')
 
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(log_filename, mode='w')
+            logging.FileHandler(log_filename, mode='w', encoding='utf-8')
         ]
     )
 
@@ -243,6 +283,8 @@ def main():
     try:
         md_folder_path = os.path.join(os.path.dirname(__file__), "md")
         md_files_info = load_md_files(md_folder_path)
+
+        logger.info(f"Found {len(md_files_info)} MD files to process")
 
         setup = VectorStoreSetup()
         result = setup.setup_vector_search(md_files_info)

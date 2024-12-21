@@ -4,16 +4,14 @@ Module that provides vector similarity search functionality using Vertex AI Matc
 Handles initialization and search operations for vector similarity search.
 """
 
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional
 import logging
 from google.api_core import exceptions as core_exceptions
 from google.cloud import aiplatform
 from google.cloud.aiplatform.matching_engine.matching_engine_index_endpoint import (
     MatchingEngineIndexEndpoint,
     MatchNeighbor,
-    HybridQuery,
     Namespace,
-    NumericNamespace,
 )
 
 logger = logging.getLogger(__name__)

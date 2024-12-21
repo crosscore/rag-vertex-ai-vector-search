@@ -38,14 +38,16 @@ class FirestoreManager:
     def save_text_metadata(self,
                             collection: str,
                             data_point_id: str,
-                            text: str,
+                            filename: str,
+                            content: str,
                             additional_metadata: Optional[Dict[str, Any]] = None) -> None:
         """Save text metadata to Firestore
 
         Args:
             collection: Collection name
             data_point_id: Data point ID
-            text: Text to save
+            filename: Name of the file
+            content: Text content
             additional_metadata: Additional metadata (optional)
 
         Raises:
@@ -57,7 +59,8 @@ class FirestoreManager:
             # Prepare basic metadata
             metadata = {
                 "data_point_id": data_point_id,
-                "text": text,
+                "filename": filename,
+                "content": content,
                 "created_at": datetime.now(),
                 "updated_at": datetime.now()
             }
@@ -111,9 +114,10 @@ class FirestoreManager:
 
         Args:
             collection: Collection name
-            metadata_list: List of metadata. Each element must contain the following keys:
+            metadata_list: List of metadata. Each element must contain:
                             - data_point_id: Data point ID
-                            - text: Text
+                            - filename: Name of the file
+                            - content: Text content
                             - additional_metadata: Additional metadata (optional)
 
         Raises:
@@ -129,7 +133,8 @@ class FirestoreManager:
                 # Prepare basic metadata
                 doc_data = {
                     "data_point_id": metadata['data_point_id'],
-                    "text": metadata['text'],
+                    "filename": metadata['filename'],
+                    "content": metadata['content'],
                     "created_at": now,
                     "updated_at": now
                 }

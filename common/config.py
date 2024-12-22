@@ -4,7 +4,7 @@ A module that manages common settings for the RAG system.
 Basic settings such as project ID, region, and model name.
 """
 # Google Cloud Project settings
-PROJECT_ID = "990681154812"
+PROJECT_ID = "business-test-001"
 REGION = "asia-northeast1"
 
 # Vector Search Resource IDs

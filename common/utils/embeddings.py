@@ -1,14 +1,17 @@
 # app/common/utils/embeddings.py
 """
 Module responsible for generating text embeddings.
-Provides functions for token validation and embedding generation.
+Provides comprehensive functionality for token validation and embedding generation
+with robust error handling and parallel processing capabilities.
 """
 from vertexai.language_models import TextEmbeddingModel
 import tiktoken
-from typing import List, Dict, Optional
+from typing import List, Dict, Any, Optional, Union
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from enum import Enum
 from ...common.config import (
     EMBEDDING_MODEL,
     MAX_TOKENS_PER_TEXT,
@@ -19,198 +22,301 @@ from ...common.config import (
 
 logger = logging.getLogger(__name__)
 
-def count_tokens(text: str, encoding_name: str = "cl100k_base") -> int:
-    """Count the number of tokens in a text
+class EmbeddingError(Exception):
+    """Base exception class for embedding operations"""
+    pass
 
-    Args:
-        text: Text to count tokens for
-        encoding_name: Name of the encoding to use
+class TokenizationError(EmbeddingError):
+    """Exception raised for tokenization-related errors"""
+    pass
 
-    Returns:
-        Number of tokens in the text
+class EmbeddingGenerationError(EmbeddingError):
+    """Exception raised when embedding generation fails"""
+    pass
 
-    Raises:
-        ValueError: If the encoding is not supported
-    """
-    try:
-        encoding = tiktoken.get_encoding(encoding_name)
-        return len(encoding.encode(text))
-    except Exception as e:
-        error_msg = f"Failed to count tokens: {str(e)}"
-        logger.error(error_msg)
-        raise ValueError(error_msg) from e
+class BatchProcessingError(EmbeddingError):
+    """Exception raised when batch processing fails"""
+    pass
 
-def validate_token_count_per_text(text_info_list: List[Dict[str, str]]) -> None:
-    """Validates the number of tokens in each text
+class EncodingType(Enum):
+    """Supported encoding types for tokenization"""
+    CL100K_BASE = "cl100k_base"
+    P50K_BASE = "p50k_base"
+    R50K_BASE = "r50k_base"
 
-    Args:
-        text_info_list: List of text information to validate. Each element should be
-                        a dictionary with 'filename' and 'content' keys.
+@dataclass
+class TokenValidationResult:
+    """Results of token validation"""
+    is_valid: bool
+    token_count: int
+    error_message: Optional[str] = None
 
-    Raises:
-        ValueError: If any text exceeds the token limit
-    """
-    total_tokens = 0
-    for text_info in text_info_list:
-        filename = text_info['filename']
-        text = text_info['content']
+@dataclass
+class EmbeddingConfig:
+    """Configuration for embedding generation"""
+    model_name: str = EMBEDDING_MODEL
+    max_tokens: int = MAX_TOKENS_PER_TEXT
+    batch_size: int = EMBEDDING_BATCH_SIZE
+    retry_attempts: int = MAX_RETRY_ATTEMPTS
+    retry_delay: int = RETRY_DELAY_SECONDS
+    encoding_type: EncodingType = EncodingType.CL100K_BASE
 
+class TextTokenizer:
+    """Class to handle text tokenization operations"""
+
+    def __init__(self, encoding_type: EncodingType = EncodingType.CL100K_BASE):
+        """Initialize tokenizer with specified encoding
+
+        Args:
+            encoding_type: Type of encoding to use for tokenization
+
+        Raises:
+            TokenizationError: If encoding initialization fails
+        """
         try:
-            num_tokens = count_tokens(text)
-            logger.info(f"Number of tokens in {filename}: {num_tokens}")
-
-            if num_tokens > MAX_TOKENS_PER_TEXT:
-                error_msg = (
-                    f"Text in {filename} exceeds token limit. "
-                    f"Limit: {MAX_TOKENS_PER_TEXT}, "
-                    f"Actual: {num_tokens}, "
-                    f"Text beginning: '{text[:100]}...'"
-                )
-                logger.error(error_msg)
-                raise ValueError(error_msg)
-
-            total_tokens += num_tokens
-
+            self.encoding = tiktoken.get_encoding(encoding_type.value)
+            logger.debug(f"Initialized tokenizer with encoding: {encoding_type.value}")
         except Exception as e:
-            error_msg = f"Token validation failed for {filename}: {str(e)}"
+            error_msg = f"Failed to initialize encoding {encoding_type.value}: {str(e)}"
             logger.error(error_msg)
-            raise ValueError(error_msg) from e
+            raise TokenizationError(error_msg) from e
 
-    logger.info(f"Total number of tokens in all texts: {total_tokens}")
+    def count_tokens(self, text: str) -> int:
+        """Count tokens in a text string
 
-def embed_single_text(text: str,
-                        model: TextEmbeddingModel,
-                        retry_attempts: int = MAX_RETRY_ATTEMPTS) -> List[float]:
-    """Generate embedding for a single text with retry logic
+        Args:
+            text: Text to count tokens for
 
-    Args:
-        text: Text to generate embedding for
-        model: The embedding model to use
-        retry_attempts: Number of retry attempts for failed requests
+        Returns:
+            Number of tokens in the text
 
-    Returns:
-        List of embedding values
-
-    Raises:
-        Exception: If embedding generation fails after all retries
-    """
-    for attempt in range(retry_attempts):
+        Raises:
+            TokenizationError: If token counting fails
+        """
         try:
-            embedding = model.get_embeddings([text])[0]
-            return embedding.values
+            return len(self.encoding.encode(text))
+        except Exception as e:
+            error_msg = f"Failed to count tokens: {str(e)}"
+            logger.error(error_msg)
+            raise TokenizationError(error_msg) from e
+
+    def validate_token_count(self,
+                            text: str,
+                            max_tokens: int) -> TokenValidationResult:
+        """Validate token count against maximum limit
+
+        Args:
+            text: Text to validate
+            max_tokens: Maximum allowed tokens
+
+        Returns:
+            TokenValidationResult object with validation results
+        """
+        try:
+            token_count = self.count_tokens(text)
+            is_valid = token_count <= max_tokens
+            error_message = None if is_valid else (
+                f"Token count {token_count} exceeds limit {max_tokens}"
+            )
+
+            return TokenValidationResult(
+                is_valid=is_valid,
+                token_count=token_count,
+                error_message=error_message
+            )
+        except TokenizationError as e:
+            return TokenValidationResult(
+                is_valid=False,
+                token_count=0,
+                error_message=str(e)
+            )
+
+class EmbeddingGenerator:
+    """Class to handle embedding generation operations"""
+
+    def __init__(self, config: Optional[EmbeddingConfig] = None):
+        """Initialize embedding generator
+
+        Args:
+            config: Configuration for embedding generation
+        """
+        self.config = config or EmbeddingConfig()
+        self.tokenizer = TextTokenizer(self.config.encoding_type)
+        self.model = TextEmbeddingModel.from_pretrained(self.config.model_name)
+        logger.info(f"Initialized embedding generator with model: {self.config.model_name}")
+
+    def _generate_single_embedding(self, text: str) -> List[float]:
+        """Generate embedding for a single text with retry logic
+
+        Args:
+            text: Text to generate embedding for
+
+        Returns:
+            List of embedding values
+
+        Raises:
+            EmbeddingGenerationError: If embedding generation fails after all retries
+        """
+        for attempt in range(self.config.retry_attempts):
+            try:
+                embedding = self.model.get_embeddings([text])[0]
+                return embedding.values
+
+            except Exception as e:
+                if attempt == self.config.retry_attempts - 1:
+                    error_msg = (
+                        f"Failed to generate embedding after {self.config.retry_attempts} attempts. "
+                        f"Text beginning: '{text[:100]}...', Error: {str(e)}"
+                    )
+                    logger.error(error_msg)
+                    raise EmbeddingGenerationError(error_msg) from e
+
+                logger.warning(
+                    f"Embedding generation attempt {attempt + 1} failed. "
+                    f"Retrying in {self.config.retry_delay} seconds..."
+                )
+                time.sleep(self.config.retry_delay)
+
+    def _process_batch(self,
+                        texts: List[str],
+                        start_idx: int) -> List[List[float]]:
+        """Process a batch of texts to generate embeddings
+
+        Args:
+            texts: List of texts to process
+            start_idx: Starting index of the batch (for logging)
+
+        Returns:
+            List of embedding vectors
+
+        Raises:
+            BatchProcessingError: If batch processing fails
+        """
+        try:
+            embeddings = self.model.get_embeddings(texts)
+            logger.debug(f"Successfully processed batch starting at index {start_idx}")
+            return [embedding.values for embedding in embeddings]
+        except Exception as e:
+            error_msg = f"Failed to process batch starting at index {start_idx}: {str(e)}"
+            logger.error(error_msg)
+            raise BatchProcessingError(error_msg) from e
+
+    def validate_and_prepare_texts(self,
+                                    text_info_list: List[Dict[str, str]]) -> List[str]:
+        """Validate and prepare texts for embedding generation
+
+        Args:
+            text_info_list: List of text information dictionaries
+
+        Returns:
+            List of validated texts
+
+        Raises:
+            TokenizationError: If any text fails validation
+        """
+        prepared_texts = []
+        total_tokens = 0
+
+        for text_info in text_info_list:
+            filename = text_info['filename']
+            text = text_info['content']
+
+            validation_result = self.tokenizer.validate_token_count(
+                text,
+                self.config.max_tokens
+            )
+
+            if not validation_result.is_valid:
+                raise TokenizationError(
+                    f"Validation failed for {filename}: {validation_result.error_message}"
+                )
+
+            total_tokens += validation_result.token_count
+            prepared_texts.append(text)
+
+        logger.info(f"Total tokens in all texts: {total_tokens}")
+        return prepared_texts
+
+    def generate_embeddings(self,
+                            text_info_list: List[Dict[str, str]]) -> List[List[float]]:
+        """Generate embeddings for multiple texts with batching and parallel processing
+
+        Args:
+            text_info_list: List of text information dictionaries
+
+        Returns:
+            List of embedding vectors
+
+        Raises:
+            EmbeddingError: If embedding generation fails
+        """
+        try:
+            # Validate and prepare texts
+            texts = self.validate_and_prepare_texts(text_info_list)
+            total_texts = len(texts)
+
+            # Prepare batches
+            batches = [
+                texts[i:i + self.config.batch_size]
+                for i in range(0, total_texts, self.config.batch_size)
+            ]
+
+            all_embeddings = []
+            start_time = time.time()
+
+            # Process batches with parallel execution
+            with ThreadPoolExecutor() as executor:
+                future_to_batch = {
+                    executor.submit(self._process_batch, batch, i * self.config.batch_size): i
+                    for i, batch in enumerate(batches)
+                }
+
+                for future in as_completed(future_to_batch):
+                    batch_idx = future_to_batch[future]
+                    try:
+                        batch_embeddings = future.result()
+                        all_embeddings.extend(batch_embeddings)
+                        logger.info(
+                            f"Completed batch {batch_idx + 1}/{len(batches)}, "
+                            f"Total progress: {len(all_embeddings)}/{total_texts}"
+                        )
+                    except BatchProcessingError as e:
+                        error_msg = f"Batch {batch_idx + 1} failed: {str(e)}"
+                        logger.error(error_msg)
+                        raise EmbeddingError(error_msg) from e
+
+            # Verify results
+            if len(all_embeddings) != total_texts:
+                raise EmbeddingError(
+                    f"Embedding count mismatch. Expected: {total_texts}, "
+                    f"Got: {len(all_embeddings)}"
+                )
+
+            total_time = time.time() - start_time
+            logger.info(
+                f"Successfully generated {len(all_embeddings)} embeddings "
+                f"in {total_time:.2f} seconds"
+            )
+            return all_embeddings
 
         except Exception as e:
-            if attempt == retry_attempts - 1:  # Last attempt
-                error_msg = (
-                    f"Failed to generate embedding after {retry_attempts} attempts. "
-                    f"Text beginning: '{text[:100]}...', Error: {str(e)}"
-                )
-                logger.error(error_msg)
-                raise Exception(error_msg) from e
-
-            logger.warning(
-                f"Embedding generation attempt {attempt + 1} failed. "
-                f"Retrying in {RETRY_DELAY_SECONDS} seconds..."
-            )
-            time.sleep(RETRY_DELAY_SECONDS)
-
-def process_batch(texts: List[str],
-                    model: TextEmbeddingModel,
-                    start_idx: int) -> List[List[float]]:
-    """Process a batch of texts to generate embeddings
-
-    Args:
-        texts: List of texts to generate embeddings for
-        model: The embedding model to use
-        start_idx: Starting index of the batch (for logging)
-
-    Returns:
-        List of embedding vectors
-
-    Raises:
-        Exception: If embedding generation fails for the batch
-    """
-    try:
-        embeddings = model.get_embeddings(texts)
-        logger.info(f"Successfully processed batch starting at index {start_idx}")
-        return [embedding.values for embedding in embeddings]
-    except Exception as e:
-        error_msg = f"Failed to process batch starting at index {start_idx}: {str(e)}"
-        logger.error(error_msg)
-        raise Exception(error_msg) from e
+            error_msg = f"Embedding generation failed: {str(e)}"
+            logger.error(error_msg)
+            raise EmbeddingError(error_msg) from e
 
 def embed_texts(text_info_list: List[Dict[str, str]],
-                model_name: str = EMBEDDING_MODEL) -> List[List[float]]:
-    """Generate embeddings for multiple texts with batching and parallel processing
+                config: Optional[EmbeddingConfig] = None) -> List[List[float]]:
+    """Convenience function to generate embeddings with default configuration
 
     Args:
-        text_info_list: List of text information. Each element should be a dictionary
-                        with 'filename' and 'content' keys.
-        model_name: Name of the embedding model to use
+        text_info_list: List of text information dictionaries
+        config: Optional custom configuration
 
     Returns:
         List of embedding vectors
 
     Raises:
-        Exception: If embedding generation fails
+        EmbeddingError: If embedding generation fails
     """
-    try:
-        # Validate token counts
-        validate_token_count_per_text(text_info_list)
-
-        # Initialize the model
-        model = TextEmbeddingModel.from_pretrained(model_name)
-        logger.info(f"Initialized embedding model: {model_name}")
-
-        # Extract text content for processing
-        texts = [info['content'] for info in text_info_list]
-        total_texts = len(texts)
-
-        # Prepare batches
-        batches = [
-            texts[i:i + EMBEDDING_BATCH_SIZE]
-            for i in range(0, total_texts, EMBEDDING_BATCH_SIZE)
-        ]
-
-        all_embeddings = []
-        start_time = time.time()
-
-        # Process batches with parallel execution
-        with ThreadPoolExecutor() as executor:
-            future_to_batch = {
-                executor.submit(process_batch, batch, model, i * EMBEDDING_BATCH_SIZE): i
-                for i, batch in enumerate(batches)
-            }
-
-            for future in as_completed(future_to_batch):
-                batch_idx = future_to_batch[future]
-                try:
-                    batch_embeddings = future.result()
-                    all_embeddings.extend(batch_embeddings)
-                    logger.info(
-                        f"Completed batch {batch_idx + 1}/{len(batches)}, "
-                        f"Total progress: {len(all_embeddings)}/{total_texts}"
-                    )
-                except Exception as e:
-                    error_msg = f"Batch {batch_idx + 1} failed: {str(e)}"
-                    logger.error(error_msg)
-                    raise Exception(error_msg) from e
-
-        # Verify results
-        if len(all_embeddings) != total_texts:
-            raise ValueError(
-                f"Embedding count mismatch. Expected: {total_texts}, "
-                f"Got: {len(all_embeddings)}"
-            )
-
-        total_time = time.time() - start_time
-        logger.info(
-            f"Successfully generated {len(all_embeddings)} embeddings "
-            f"in {total_time:.2f} seconds"
-        )
-        return all_embeddings
-
-    except Exception as e:
-        error_msg = f"Embedding generation failed: {str(e)}"
-        logger.error(error_msg)
-        raise Exception(error_msg) from e
+    generator = EmbeddingGenerator(config)
+    return generator.generate_embeddings(text_info_list)

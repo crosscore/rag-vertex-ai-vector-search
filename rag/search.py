@@ -1,12 +1,13 @@
 # app/rag/search.py
 """
 Module for performing semantic search operations using Vector Search.
-Provides functionality to search for relevant table metadata based on user queries.
+Integrates vector search, result formatting, and metadata management for comprehensive search functionality.
 """
 from typing import List, Dict, Any
 import logging
 from datetime import datetime
 import os
+from dataclasses import dataclass
 
 from ..common.config import (
     PROJECT_ID,
@@ -15,11 +16,33 @@ from ..common.config import (
     ENDPOINT_DISPLAY_NAME,
     FIRESTORE_COLLECTION
 )
-from ..common.utils.vector_search import VectorSearchClient, format_search_results
+from ..common.utils.vector_search import (
+    VectorSearchClient,
+    SearchConfiguration,
+    VectorSearchError
+)
 from ..common.utils.embeddings import embed_texts
+from ..common.utils.result_formatter import (
+    ResultFormatter,
+    ResultAnalyzer,
+    ResultType,
+    StatisticalSummary
+)
 from ..vector_store.utils.firestore_ops import FirestoreManager
 
 logger = logging.getLogger(__name__)
+
+@dataclass
+class SearchParameters:
+    """Configuration parameters for semantic search"""
+    num_results: int = 10
+    min_similarity_score: float = 0.0
+    include_metadata: bool = True
+    compute_statistics: bool = True
+
+class SearchError(Exception):
+    """Base exception class for search operations"""
+    pass
 
 class SemanticSearcher:
     """Class to perform semantic search operations"""
@@ -29,94 +52,183 @@ class SemanticSearcher:
         self.project_id = PROJECT_ID
         self.region = REGION
         self.deployed_index_id = DEPLOYED_INDEX_ID
+
+        # Initialize clients
         self.vector_client = VectorSearchClient(project_id=self.project_id, location=self.region)
         self.firestore_manager = FirestoreManager()
+        self.result_formatter = ResultFormatter(result_type=ResultType.SEARCH)
+        self.result_analyzer = ResultAnalyzer()
+
         self._initialize_clients()
 
     def _initialize_clients(self) -> None:
-        """Initialize Vector Search and Firestore clients"""
+        """Initialize Vector Search and Firestore clients
+
+        Raises:
+            SearchError: If client initialization fails
+        """
         try:
             # Initialize Vector Search endpoint
-            endpoint_name = f"projects/{self.project_id}/locations/{self.region}/indexEndpoints/{ENDPOINT_DISPLAY_NAME}"
+            endpoint_name = (f"projects/{self.project_id}/locations/{self.region}/"
+                           f"indexEndpoints/{ENDPOINT_DISPLAY_NAME}")
             self.vector_client.initialize_endpoint(endpoint_name)
-            logger.info("Vector Search client initialized successfully")
+            logger.info("Clients initialized successfully")
 
-        except Exception as e:
-            error_msg = f"Failed to initialize clients: {str(e)}"
+        except VectorSearchError as e:
+            error_msg = f"Failed to initialize vector search client: {str(e)}"
             logger.error(error_msg)
-            raise RuntimeError(error_msg) from e
+            raise SearchError(error_msg) from e
+        except Exception as e:
+            error_msg = f"Unexpected error during client initialization: {str(e)}"
+            logger.error(error_msg)
+            raise SearchError(error_msg) from e
 
-    def search(self,
-                questions: List[str],
-                num_results: int = 10,
-                min_similarity_score: float = 0.0) -> List[Dict[str, Any]]:
-        """Perform semantic search for multiple questions
+    def _generate_embeddings(self, questions: List[str]) -> List[List[float]]:
+        """Generate embeddings for search questions
 
         Args:
-            questions: List of question strings to search for
-            num_results: Number of results to return per question
+            questions: List of questions to generate embeddings for
+
+        Returns:
+            List of embedding vectors
+
+        Raises:
+            SearchError: If embedding generation fails
+        """
+        try:
+            questions_info = [
+                {"filename": f"question_{i}", "content": q}
+                for i, q in enumerate(questions)
+            ]
+
+            embeddings = embed_texts(questions_info)
+            logger.info(f"Generated embeddings for {len(questions)} questions")
+            return embeddings
+
+        except Exception as e:
+            error_msg = f"Failed to generate embeddings: {str(e)}"
+            logger.error(error_msg)
+            raise SearchError(error_msg) from e
+
+    def _process_search_results(self,
+                              raw_results: List[List[Any]],
+                              questions: List[str],
+                              min_similarity_score: float) -> List[Dict[str, Any]]:
+        """Process raw search results and fetch metadata
+
+        Args:
+            raw_results: Raw search results from vector search
+            questions: Original search questions
             min_similarity_score: Minimum similarity score threshold
 
         Returns:
-            List of dictionaries containing search results for each question
+            List of processed search results with metadata
+
+        Raises:
+            SearchError: If result processing fails
         """
         try:
-            # Convert questions to expected format for embedding
-            questions_info = [{"filename": f"question_{i}", "content": q}
-                            for i, q in enumerate(questions)]
+            processed_results = []
 
-            # Generate embeddings for questions
-            logger.info(f"Generating embeddings for {len(questions)} questions")
-            query_embeddings = embed_texts(questions_info)
-
-            # Perform vector similarity search
-            logger.info("Performing vector similarity search")
-            search_results = self.vector_client.find_neighbors(
-                deployed_index_id=self.deployed_index_id,
-                queries=query_embeddings,
-                num_neighbors=num_results
-            )
-
-            # Format search results
-            formatted_results = format_search_results(search_results)
-
-            # Fetch metadata from Firestore and prepare final results
-            final_results = []
-            for question, question_results in zip(questions, formatted_results):
+            for question, question_results in zip(questions, raw_results):
                 result_entries = []
-                for result in question_results:
-                    # Skip results below similarity threshold
-                    similarity_score = 1.0 - (result['distance'] / 2.0)  # Convert distance to similarity
+
+                for match in question_results:
+                    # Convert distance to similarity score
+                    similarity_score = 1.0 - (match.distance / 2.0)
                     if similarity_score < min_similarity_score:
                         continue
 
                     # Fetch metadata from Firestore
                     metadata = self.firestore_manager.get_text_metadata(
                         FIRESTORE_COLLECTION,
-                        result['id']
+                        match.id
                     )
 
                     if metadata:
                         result_entry = {
-                            'question': question,
-                            'data_point_id': result['id'],
+                            'data_point_id': match.id,
                             'similarity_score': similarity_score,
                             'metadata': metadata
                         }
                         result_entries.append(result_entry)
 
-                final_results.append({
+                processed_results.append({
                     'question': question,
                     'results': result_entries
                 })
 
-            logger.info(f"Search completed. Found results for {len(final_results)} questions")
-            return final_results
+            logger.info(f"Processed {len(processed_results)} search results")
+            return processed_results
+
+        except Exception as e:
+            error_msg = f"Failed to process search results: {str(e)}"
+            logger.error(error_msg)
+            raise SearchError(error_msg) from e
+
+    def search(self,
+               questions: List[str],
+               params: SearchParameters = SearchParameters()) -> Dict[str, Any]:
+        """Perform semantic search for multiple questions
+
+        Args:
+            questions: List of question strings to search for
+            params: Search configuration parameters
+
+        Returns:
+            Dictionary containing:
+                - results: Formatted search results
+                - statistics: Statistical analysis of results (if enabled)
+                - summary: Human-readable summary of results
+
+        Raises:
+            SearchError: If search operation fails
+        """
+        try:
+            # Generate embeddings for questions
+            query_embeddings = self._generate_embeddings(questions)
+
+            # Configure and perform vector search
+            search_config = SearchConfiguration(num_neighbors=params.num_results)
+            raw_results = self.vector_client.find_neighbors(
+                deployed_index_id=self.deployed_index_id,
+                queries=query_embeddings,
+                config=search_config
+            )
+
+            # Process results and fetch metadata
+            processed_results = self._process_search_results(
+                raw_results,
+                questions,
+                params.min_similarity_score
+            )
+
+            # Format results
+            formatted_results = self.result_formatter.to_detailed_dict(
+                processed_results,
+                include_metadata=params.include_metadata
+            )
+
+            # Prepare response
+            response = {
+                'results': formatted_results,
+                'summary': self.result_formatter.to_summary_text(processed_results)
+            }
+
+            # Add statistics if enabled
+            if params.compute_statistics:
+                stats: StatisticalSummary = self.result_analyzer.calculate_statistics(
+                    processed_results
+                )
+                response['statistics'] = stats.to_dict()
+
+            logger.info("Search completed successfully")
+            return response
 
         except Exception as e:
             error_msg = f"Search operation failed: {str(e)}"
             logger.error(error_msg)
-            raise RuntimeError(error_msg) from e
+            raise SearchError(error_msg) from e
 
 def setup_logging(log_dir: str = 'app/log') -> None:
     """Configure logging settings
@@ -124,19 +236,25 @@ def setup_logging(log_dir: str = 'app/log') -> None:
     Args:
         log_dir: Directory to store log files
     """
-    os.makedirs(log_dir, exist_ok=True)
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        log_filename = os.path.join(log_dir, f'semantic_search_{timestamp}.log')
 
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_filename = os.path.join(log_dir, f'semantic_search_{timestamp}.log')
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+            handlers=[
+                logging.StreamHandler(),
+                logging.FileHandler(log_filename, mode='w', encoding='utf-8')
+            ]
+        )
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler(log_filename, mode='w', encoding='utf-8')
-        ]
-    )
+        logger.info(f"Logging initialized: {log_filename}")
+
+    except Exception as e:
+        print(f"Failed to setup logging: {str(e)}")
+        raise
 
 def main() -> None:
     """Main execution function"""
@@ -151,29 +269,28 @@ def main() -> None:
             "Show me tables related to sales transactions"
         ]
 
+        # Configure search parameters
+        search_params = SearchParameters(
+            num_results=10,
+            min_similarity_score=0.5,
+            include_metadata=True,
+            compute_statistics=True
+        )
+
         # Initialize searcher and perform search
         searcher = SemanticSearcher()
-        results = searcher.search(
+        search_output = searcher.search(
             questions=test_questions,
-            num_results=10,
-            min_similarity_score=0.5
+            params=search_params
         )
 
         # Log results
-        for question_result in results:
-            question = question_result['question']
-            matches = question_result['results']
+        logger.info("\n=== Search Statistics ===")
+        for key, value in search_output['statistics'].items():
+            logger.info(f"{key}: {value}")
 
-            logger.info(f"\nResults for question: {question}")
-            for i, match in enumerate(matches, 1):
-                logger.info(f"Match {i}:")
-                logger.info(f"  Data Point ID: {match['data_point_id']}")
-                logger.info(f"  Similarity Score: {match['similarity_score']:.4f}")
-                if 'filename' in match['metadata']:
-                    logger.info(f"  Filename: {match['metadata']['filename']}")
-                if 'content' in match['metadata']:
-                    content_preview = match['metadata']['content'][:100] + "..."
-                    logger.info(f"  Content Preview: {content_preview}")
+        logger.info("\n=== Search Results ===")
+        logger.info(search_output['summary'])
 
     except Exception as e:
         logger.error(f"Main execution failed: {str(e)}")

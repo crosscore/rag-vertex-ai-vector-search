@@ -54,30 +54,7 @@ class SemanticSearcher:
         self.firestore_manager = FirestoreManager()
         self.result_formatter = ResultFormatter(result_type=ResultType.SEARCH)
         self.result_analyzer = ResultAnalyzer()
-
-        self._initialize_clients()
-
-    def _initialize_clients(self) -> None:
-        """Initialize Vector Search and Firestore clients
-
-        Raises:
-            SearchError: If client initialization fails
-        """
-        try:
-            # Initialize Vector Search endpoint using the resource ID
-            endpoint_name = (f"projects/{PROJECT_ID}/locations/{REGION}/"
-                            f"indexEndpoints/{ENDPOINT_RESOURCE_ID}")
-            self.vector_client.initialize_endpoint(endpoint_name)
-            logger.info("Clients initialized successfully")
-
-        except VectorSearchError as e:
-            error_msg = f"Failed to initialize vector search client: {str(e)}"
-            logger.error(error_msg)
-            raise SearchError(error_msg) from e
-        except Exception as e:
-            error_msg = f"Unexpected error during client initialization: {str(e)}"
-            logger.error(error_msg)
-            raise SearchError(error_msg) from e
+        logger.info("Semantic searcher initialized successfully")
 
     def _generate_embeddings(self, questions: List[str]) -> List[List[float]]:
         """Generate embeddings for search questions
@@ -103,6 +80,69 @@ class SemanticSearcher:
 
         except Exception as e:
             error_msg = f"Failed to generate embeddings: {str(e)}"
+            logger.error(error_msg)
+            raise SearchError(error_msg) from e
+
+    def search(self,
+                questions: List[str],
+                params: SearchParameters = SearchParameters()) -> Dict[str, Any]:
+        """Perform semantic search for multiple questions
+
+        Args:
+            questions: List of question strings to search for
+            params: Search configuration parameters
+
+        Returns:
+            Dictionary containing:
+                - results: Formatted search results
+                - statistics: Statistical analysis of results (if enabled)
+                - summary: Human-readable summary of results
+
+        Raises:
+            SearchError: If search operation fails
+        """
+        try:
+            query_embeddings = self._generate_embeddings(questions)
+
+            # Perform vector similarity search
+            search_config = SearchConfiguration(num_neighbors=params.num_results)
+            raw_results = self.vector_client.find_neighbors(
+                deployed_index_id=DEPLOYED_INDEX_ID,
+                queries=query_embeddings,
+                config=search_config
+            )
+
+            # Process results and fetch metadata
+            processed_results = self._process_search_results(
+                raw_results,
+                questions,
+                params.min_similarity_score
+            )
+
+            # Format results
+            formatted_results = self.result_formatter.to_detailed_dict(
+                processed_results,
+                include_metadata=params.include_metadata
+            )
+
+            # Prepare response
+            response = {
+                'results': formatted_results,
+                'summary': self.result_formatter.to_summary_text(processed_results)
+            }
+
+            # Add statistics if enabled
+            if params.compute_statistics:
+                stats: StatisticalSummary = self.result_analyzer.calculate_statistics(
+                    processed_results
+                )
+                response['statistics'] = stats.to_dict()
+
+            logger.info("Search completed successfully")
+            return response
+
+        except Exception as e:
+            error_msg = f"Search operation failed: {str(e)}"
             logger.error(error_msg)
             raise SearchError(error_msg) from e
 
@@ -162,67 +202,6 @@ class SemanticSearcher:
             logger.error(error_msg)
             raise SearchError(error_msg) from e
 
-    def search(self,
-                questions: List[str],
-                params: SearchParameters = SearchParameters()) -> Dict[str, Any]:
-        """Perform semantic search for multiple questions
-
-        Args:
-            questions: List of question strings to search for
-            params: Search configuration parameters
-
-        Returns:
-            Dictionary containing:
-                - results: Formatted search results
-                - statistics: Statistical analysis of results (if enabled)
-                - summary: Human-readable summary of results
-
-        Raises:
-            SearchError: If search operation fails
-        """
-        try:
-            query_embeddings = self._generate_embeddings(questions)
-
-            search_config = SearchConfiguration(num_neighbors=params.num_results)
-            raw_results = self.vector_client.find_neighbors(
-                deployed_index_id=DEPLOYED_INDEX_ID,
-                queries=query_embeddings,
-                config=search_config
-            )
-
-            # Process results and fetch metadata
-            processed_results = self._process_search_results(
-                raw_results,
-                questions,
-                params.min_similarity_score
-            )
-
-            # Format results
-            formatted_results = self.result_formatter.to_detailed_dict(
-                processed_results,
-                include_metadata=params.include_metadata
-            )
-
-            # Prepare response
-            response = {
-                'results': formatted_results,
-                'summary': self.result_formatter.to_summary_text(processed_results)
-            }
-
-            # Add statistics if enabled
-            if params.compute_statistics:
-                stats: StatisticalSummary = self.result_analyzer.calculate_statistics(
-                    processed_results
-                )
-                response['statistics'] = stats.to_dict()
-
-            logger.info("Search completed successfully")
-            return response
-
-        except Exception as e:
-            error_msg = f"Search operation failed: {str(e)}"
-            logger.error(error_msg)
-            raise SearchError(error_msg) from e
 
 def setup_logging(log_dir: str = 'app/log') -> None:
     """Configure logging settings

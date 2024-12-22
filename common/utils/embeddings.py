@@ -1,12 +1,7 @@
 # app/common/utils/embeddings.py
-"""
-Module responsible for generating text embeddings.
-Provides comprehensive functionality for token validation and embedding generation
-with robust error handling and parallel processing capabilities.
-"""
 from vertexai.language_models import TextEmbeddingModel
 import tiktoken
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Optional
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -23,37 +18,30 @@ from ...common.config import (
 logger = logging.getLogger(__name__)
 
 class EmbeddingError(Exception):
-    """Base exception class for embedding operations"""
     pass
 
 class TokenizationError(EmbeddingError):
-    """Exception raised for tokenization-related errors"""
     pass
 
 class EmbeddingGenerationError(EmbeddingError):
-    """Exception raised when embedding generation fails"""
     pass
 
 class BatchProcessingError(EmbeddingError):
-    """Exception raised when batch processing fails"""
     pass
 
 class EncodingType(Enum):
-    """Supported encoding types for tokenization"""
     CL100K_BASE = "cl100k_base"
     P50K_BASE = "p50k_base"
     R50K_BASE = "r50k_base"
 
 @dataclass
 class TokenValidationResult:
-    """Results of token validation"""
     is_valid: bool
     token_count: int
     error_message: Optional[str] = None
 
 @dataclass
 class EmbeddingConfig:
-    """Configuration for embedding generation"""
     model_name: str = EMBEDDING_MODEL
     max_tokens: int = MAX_TOKENS_PER_TEXT
     batch_size: int = EMBEDDING_BATCH_SIZE
@@ -62,17 +50,7 @@ class EmbeddingConfig:
     encoding_type: EncodingType = EncodingType.CL100K_BASE
 
 class TextTokenizer:
-    """Class to handle text tokenization operations"""
-
     def __init__(self, encoding_type: EncodingType = EncodingType.CL100K_BASE):
-        """Initialize tokenizer with specified encoding
-
-        Args:
-            encoding_type: Type of encoding to use for tokenization
-
-        Raises:
-            TokenizationError: If encoding initialization fails
-        """
         try:
             self.encoding = tiktoken.get_encoding(encoding_type.value)
             logger.debug(f"Initialized tokenizer with encoding: {encoding_type.value}")
@@ -82,17 +60,6 @@ class TextTokenizer:
             raise TokenizationError(error_msg) from e
 
     def count_tokens(self, text: str) -> int:
-        """Count tokens in a text string
-
-        Args:
-            text: Text to count tokens for
-
-        Returns:
-            Number of tokens in the text
-
-        Raises:
-            TokenizationError: If token counting fails
-        """
         try:
             return len(self.encoding.encode(text))
         except Exception as e:
@@ -103,15 +70,6 @@ class TextTokenizer:
     def validate_token_count(self,
                             text: str,
                             max_tokens: int) -> TokenValidationResult:
-        """Validate token count against maximum limit
-
-        Args:
-            text: Text to validate
-            max_tokens: Maximum allowed tokens
-
-        Returns:
-            TokenValidationResult object with validation results
-        """
         try:
             token_count = self.count_tokens(text)
             is_valid = token_count <= max_tokens
@@ -132,31 +90,13 @@ class TextTokenizer:
             )
 
 class EmbeddingGenerator:
-    """Class to handle embedding generation operations"""
-
     def __init__(self, config: Optional[EmbeddingConfig] = None):
-        """Initialize embedding generator
-
-        Args:
-            config: Configuration for embedding generation
-        """
         self.config = config or EmbeddingConfig()
         self.tokenizer = TextTokenizer(self.config.encoding_type)
         self.model = TextEmbeddingModel.from_pretrained(self.config.model_name)
         logger.info(f"Initialized embedding generator with model: {self.config.model_name}")
 
     def _generate_single_embedding(self, text: str) -> List[float]:
-        """Generate embedding for a single text with retry logic
-
-        Args:
-            text: Text to generate embedding for
-
-        Returns:
-            List of embedding values
-
-        Raises:
-            EmbeddingGenerationError: If embedding generation fails after all retries
-        """
         for attempt in range(self.config.retry_attempts):
             try:
                 embedding = self.model.get_embeddings([text])[0]
@@ -180,18 +120,6 @@ class EmbeddingGenerator:
     def _process_batch(self,
                         texts: List[str],
                         start_idx: int) -> List[List[float]]:
-        """Process a batch of texts to generate embeddings
-
-        Args:
-            texts: List of texts to process
-            start_idx: Starting index of the batch (for logging)
-
-        Returns:
-            List of embedding vectors
-
-        Raises:
-            BatchProcessingError: If batch processing fails
-        """
         try:
             embeddings = self.model.get_embeddings(texts)
             logger.debug(f"Successfully processed batch starting at index {start_idx}")
@@ -203,17 +131,6 @@ class EmbeddingGenerator:
 
     def validate_and_prepare_texts(self,
                                     text_info_list: List[Dict[str, str]]) -> List[str]:
-        """Validate and prepare texts for embedding generation
-
-        Args:
-            text_info_list: List of text information dictionaries
-
-        Returns:
-            List of validated texts
-
-        Raises:
-            TokenizationError: If any text fails validation
-        """
         prepared_texts = []
         total_tokens = 0
 
@@ -239,17 +156,6 @@ class EmbeddingGenerator:
 
     def generate_embeddings(self,
                             text_info_list: List[Dict[str, str]]) -> List[List[float]]:
-        """Generate embeddings for multiple texts with batching and parallel processing
-
-        Args:
-            text_info_list: List of text information dictionaries
-
-        Returns:
-            List of embedding vectors
-
-        Raises:
-            EmbeddingError: If embedding generation fails
-        """
         try:
             # Validate and prepare texts
             texts = self.validate_and_prepare_texts(text_info_list)
@@ -306,17 +212,5 @@ class EmbeddingGenerator:
 
 def embed_texts(text_info_list: List[Dict[str, str]],
                 config: Optional[EmbeddingConfig] = None) -> List[List[float]]:
-    """Convenience function to generate embeddings with default configuration
-
-    Args:
-        text_info_list: List of text information dictionaries
-        config: Optional custom configuration
-
-    Returns:
-        List of embedding vectors
-
-    Raises:
-        EmbeddingError: If embedding generation fails
-    """
     generator = EmbeddingGenerator(config)
     return generator.generate_embeddings(text_info_list)

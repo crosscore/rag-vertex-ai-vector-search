@@ -23,15 +23,7 @@ from ...common.config import (
 logger = logging.getLogger(__name__)
 
 class IndexManager:
-    """Class to manage Vector Search indexes using low-level Vertex AI API"""
-
     def __init__(self, project_id: str = PROJECT_ID, region: str = REGION):
-        """Initialize the Index Manager
-
-        Args:
-            project_id: Project ID
-            region: Region
-        """
         self.project_id = project_id
         self.region = region
         self.parent = f"projects/{project_id}/locations/{region}"
@@ -45,19 +37,6 @@ class IndexManager:
                     display_name: str,
                     dimension: int,
                     description: Optional[str] = None) -> Operation:
-        """Create a new index
-
-        Args:
-            display_name: Display name of the index
-            dimension: Number of dimensions of the vector
-            description: Description of the index (optional)
-
-        Returns:
-            Operation: The long-running operation for index creation
-
-        Raises:
-            GoogleAPIError: If index creation fails
-        """
         try:
             # Prepare index configuration
             config = INDEX_CONFIG.copy()
@@ -91,18 +70,6 @@ class IndexManager:
     def create_endpoint(self,
                         display_name: str,
                         description: Optional[str] = None) -> Operation:
-        """Create a new endpoint
-
-        Args:
-            display_name: Display name of the endpoint
-            description: Description of the endpoint (optional)
-
-        Returns:
-            Operation: The long-running operation for endpoint creation
-
-        Raises:
-            GoogleAPIError: If endpoint creation fails
-        """
         try:
             endpoint = IndexEndpoint(
                 display_name=display_name,
@@ -127,19 +94,6 @@ class IndexManager:
                     index_name: str,
                     endpoint_name: str,
                     deployed_index_id: str) -> Operation:
-        """Deploy an index to an endpoint
-
-        Args:
-            index_name: Name of the index to deploy
-            endpoint_name: Name of the endpoint to deploy to
-            deployed_index_id: ID for the deployed index
-
-        Returns:
-            Operation: The long-running operation for index deployment
-
-        Raises:
-            GoogleAPIError: If deployment fails
-        """
         try:
             deploy_request = {
                 "index_endpoint": endpoint_name,
@@ -163,19 +117,6 @@ class IndexManager:
     def wait_for_operation(self,
                             operation: Operation,
                             timeout_minutes: int = DEPLOYMENT_TIMEOUT_MINUTES) -> Any:
-        """Wait for the operation to complete
-
-        Args:
-            operation: Operation to wait for
-            timeout_minutes: Timeout in minutes
-
-        Returns:
-            Any: Result of the operation
-
-        Raises:
-            TimeoutError: If the operation does not complete within the specified time
-            GoogleAPIError: If the operation fails
-        """
         try:
             start_time = time.time()
             while True:
@@ -199,18 +140,6 @@ class IndexManager:
     def get_deployment_state(self,
                             endpoint_name: str,
                             deployed_index_id: str) -> Dict[str, Any]:
-        """Get the deployment state
-
-        Args:
-            endpoint_name: Name of the endpoint
-            deployed_index_id: ID of the deployed index
-
-        Returns:
-            Dict[str, Any]: Dictionary containing deployment state information
-
-        Raises:
-            GoogleAPIError: If state retrieval fails
-        """
         try:
             endpoint = self.endpoint_client.get_index_endpoint(name=endpoint_name)
 

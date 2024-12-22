@@ -20,8 +20,6 @@ from .utils.firestore_ops import FirestoreManager
 from .utils.index_manager import IndexManager
 
 class VectorStoreSetup:
-    """Class to manage Vector Store setup execution"""
-
     def __init__(self):
         """Initialize necessary managers"""
         self.project_id = PROJECT_ID
@@ -31,21 +29,6 @@ class VectorStoreSetup:
         self.logger = logging.getLogger(__name__)
 
     def process_texts(self, texts: List[Dict[str, str]]) -> Dict[str, Any]:
-        """Process texts to generate embeddings and create datapoints
-
-        Args:
-            texts: List of texts to process. Each text should be a dictionary with
-                    'filename' and 'content' keys.
-
-        Returns:
-            Dictionary containing:
-                - datapoints: List of IndexDatapoint objects
-                - metadata_list: List of metadata dictionaries
-                - dimension: Dimension of the embeddings
-
-        Raises:
-            Exception: If text processing fails
-        """
         try:
             # Generate embeddings
             embeddings = embed_texts(texts)
@@ -123,21 +106,6 @@ class VectorStoreSetup:
             raise Exception(error_msg) from e
 
     def setup_vector_search(self, texts: List[Dict[str, str]]) -> Dict[str, Any]:
-        """Execute Vector Search environment setup
-
-        Args:
-            texts: List of texts to be used as initial data. Each text should be a
-                    dictionary with 'filename' and 'content' keys.
-
-        Returns:
-            Dictionary containing setup information:
-                - index_name: Name of the created index
-                - endpoint_name: Name of the created endpoint
-                - deployment_state: Final deployment state
-
-        Raises:
-            Exception: If setup fails
-        """
         start_time = time.time()
         try:
             self.logger.info("Starting Vector Search setup")
@@ -218,17 +186,6 @@ class VectorStoreSetup:
             raise Exception(error_msg) from e
 
 def load_md_files(md_folder_path: str) -> List[Dict[str, str]]:
-    """Load information from MD files
-
-    Args:
-        md_folder_path: Path to the folder containing MD files
-
-    Returns:
-        List of dictionaries containing file information
-
-    Raises:
-        Exception: If file loading fails
-    """
     try:
         if not os.path.exists(md_folder_path):
             raise FileNotFoundError(f"MD folder not found: {md_folder_path}")
@@ -259,7 +216,6 @@ def load_md_files(md_folder_path: str) -> List[Dict[str, str]]:
         raise Exception(error_msg) from e
 
 def setup_logging():
-    """Configure logging settings"""
     log_dir = 'app/log'
     os.makedirs(log_dir, exist_ok=True)
 
@@ -276,7 +232,6 @@ def setup_logging():
     )
 
 def main():
-    """Main execution function"""
     setup_logging()
     logger = logging.getLogger(__name__)
 

@@ -1,20 +1,13 @@
 # app/common/utils/vector_search.py
-"""
-Module that provides vector similarity search functionality using Vertex AI Matching Engine.
-Handles low-level vector search operations and index endpoint management.
-"""
-from typing import List, Dict, Any, Optional
+from google.cloud.aiplatform.matching_engine.matching_engine_index_endpoint import MatchingEngineIndexEndpoint
+import ssl
+import grpc
 import logging
+from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from google.api_core import exceptions as core_exceptions
-from google.cloud import aiplatform
-from google.cloud.aiplatform.matching_engine.matching_engine_index_endpoint import (
-    MatchingEngineIndexEndpoint,
-    MatchNeighbor,
-    Namespace,
-)
 
-from ...common.config import PROJECT_ID, REGION
+from ...common.config import PROJECT_ID, REGION, ENDPOINT_RESOURCE_ID
 
 logger = logging.getLogger(__name__)
 
@@ -23,23 +16,7 @@ class SearchConfiguration:
     """Configuration for vector search operations"""
     num_neighbors: int = 10
     distance_measure: str = "DOT_PRODUCT_DISTANCE"
-    namespace_filters: Optional[List[Namespace]] = None
-
-class VectorSearchError(Exception):
-    """Base exception class for vector search operations"""
-    pass
-
-class EndpointInitializationError(VectorSearchError):
-    """Exception raised when endpoint initialization fails"""
-    pass
-
-class SearchOperationError(VectorSearchError):
-    """Exception raised when search operation fails"""
-    pass
-
-class DatapointOperationError(VectorSearchError):
-    """Exception raised when datapoint operation fails"""
-    pass
+    namespace_filters: Optional[List[Any]] = None
 
 class VectorSearchClient:
     """Class to manage vector similarity search operations"""
@@ -50,51 +27,37 @@ class VectorSearchClient:
         Args:
             project_id: Google Cloud project ID
             location: Google Cloud region
-
-        Attributes:
-            project_id: Stored project ID
-            location: Stored region
-            endpoint: MatchingEngineIndexEndpoint instance (initialized later)
         """
         self.project_id = project_id
         self.location = location
-        self.endpoint: Optional[MatchingEngineIndexEndpoint] = None
+        self.endpoint_resource_id = ENDPOINT_RESOURCE_ID
+        endpoint_name = f"projects/{self.project_id}/locations/{self.location}/indexEndpoints/{self.endpoint_resource_id}"
+        self.endpoint = MatchingEngineIndexEndpoint(
+            index_endpoint_name=endpoint_name,
+            project=self.project_id,
+            location=self.location
+        )
         logger.info(f"Vector Search Client initialized for project {project_id} in {location}")
 
-    def initialize_endpoint(self, endpoint_name: str) -> None:
-        """Initialize endpoint connection
-
-        Args:
-            endpoint_name: Full resource name of the endpoint or endpoint ID
-
-        Raises:
-            EndpointInitializationError: If endpoint initialization fails
-        """
+    def _initialize_ssl_context(self) -> None:
+        """Initialize SSL context for secure connections"""
         try:
-            # Initialize Vertex AI
-            aiplatform.init(project=self.project_id, location=self.location)
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
 
-            # Get the endpoint instance
-            self.endpoint = MatchingEngineIndexEndpoint(
-                index_endpoint_name=endpoint_name,
-                project=self.project_id,
-                location=self.location,
-            )
-            logger.info(f"Successfully initialized endpoint: {endpoint_name}")
+            # gRPCチャンネルオプションの設定
+            self.channel_credentials = grpc.ssl_channel_credentials()
 
-        except core_exceptions.GoogleAPIError as e:
-            error_msg = f"Failed to initialize endpoint: {str(e)}"
-            logger.error(error_msg)
-            raise EndpointInitializationError(error_msg) from e
+            logger.info("SSL context initialized successfully")
         except Exception as e:
-            error_msg = f"Unexpected error during endpoint initialization: {str(e)}"
-            logger.error(error_msg)
-            raise EndpointInitializationError(error_msg) from e
+            logger.error(f"Failed to initialize SSL context: {str(e)}")
+            raise
 
     def find_neighbors(self,
-                        deployed_index_id: str,
-                        queries: List[List[float]],
-                        config: Optional[SearchConfiguration] = None) -> List[List[MatchNeighbor]]:
+                    deployed_index_id: str,
+                    queries: List[List[float]],
+                    config: Optional[SearchConfiguration] = None) -> List[List[Any]]:
         """Perform vector similarity search
 
         Args:
@@ -107,13 +70,7 @@ class VectorSearchClient:
 
         Raises:
             SearchOperationError: If search operation fails
-            ValueError: If endpoint is not initialized
         """
-        if not self.endpoint:
-            error_msg = "Endpoint not initialized. Call initialize_endpoint first."
-            logger.error(error_msg)
-            raise ValueError(error_msg)
-
         try:
             if config is None:
                 config = SearchConfiguration()
@@ -163,7 +120,7 @@ class VectorSearchClient:
         try:
             datapoints = self.endpoint.read_index_datapoints(
                 deployed_index_id=deployed_index_id,
-                ids=datapoint_ids,
+                ids=datapoint_ids
             )
 
             formatted_datapoints = []
@@ -201,3 +158,19 @@ class VectorSearchClient:
             error_msg = f"Unexpected error during datapoint retrieval: {str(e)}"
             logger.error(error_msg)
             raise DatapointOperationError(error_msg) from e
+
+class VectorSearchError(Exception):
+    """Base exception class for vector search operations"""
+    pass
+
+class EndpointInitializationError(VectorSearchError):
+    """Exception raised when endpoint initialization fails"""
+    pass
+
+class SearchOperationError(VectorSearchError):
+    """Exception raised when search operation fails"""
+    pass
+
+class DatapointOperationError(VectorSearchError):
+    """Exception raised when datapoint operation fails"""
+    pass

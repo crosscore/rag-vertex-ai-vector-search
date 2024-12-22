@@ -13,7 +13,7 @@ from ..common.config import (
     PROJECT_ID,
     REGION,
     DEPLOYED_INDEX_ID,
-    ENDPOINT_DISPLAY_NAME,
+    ENDPOINT_RESOURCE_ID,
     FIRESTORE_COLLECTION
 )
 from ..common.utils.vector_search import (
@@ -49,12 +49,8 @@ class SemanticSearcher:
 
     def __init__(self):
         """Initialize the semantic searcher with necessary clients"""
-        self.project_id = PROJECT_ID
-        self.region = REGION
-        self.deployed_index_id = DEPLOYED_INDEX_ID
-
         # Initialize clients
-        self.vector_client = VectorSearchClient(project_id=self.project_id, location=self.region)
+        self.vector_client = VectorSearchClient(project_id=PROJECT_ID, location=REGION)
         self.firestore_manager = FirestoreManager()
         self.result_formatter = ResultFormatter(result_type=ResultType.SEARCH)
         self.result_analyzer = ResultAnalyzer()
@@ -68,9 +64,9 @@ class SemanticSearcher:
             SearchError: If client initialization fails
         """
         try:
-            # Initialize Vector Search endpoint
-            endpoint_name = (f"projects/{self.project_id}/locations/{self.region}/"
-                           f"indexEndpoints/{ENDPOINT_DISPLAY_NAME}")
+            # Initialize Vector Search endpoint using the resource ID
+            endpoint_name = (f"projects/{PROJECT_ID}/locations/{REGION}/"
+                            f"indexEndpoints/{ENDPOINT_RESOURCE_ID}")
             self.vector_client.initialize_endpoint(endpoint_name)
             logger.info("Clients initialized successfully")
 
@@ -111,9 +107,9 @@ class SemanticSearcher:
             raise SearchError(error_msg) from e
 
     def _process_search_results(self,
-                              raw_results: List[List[Any]],
-                              questions: List[str],
-                              min_similarity_score: float) -> List[Dict[str, Any]]:
+                                raw_results: List[List[Any]],
+                                questions: List[str],
+                                min_similarity_score: float) -> List[Dict[str, Any]]:
         """Process raw search results and fetch metadata
 
         Args:
@@ -167,8 +163,8 @@ class SemanticSearcher:
             raise SearchError(error_msg) from e
 
     def search(self,
-               questions: List[str],
-               params: SearchParameters = SearchParameters()) -> Dict[str, Any]:
+                questions: List[str],
+                params: SearchParameters = SearchParameters()) -> Dict[str, Any]:
         """Perform semantic search for multiple questions
 
         Args:
@@ -185,13 +181,11 @@ class SemanticSearcher:
             SearchError: If search operation fails
         """
         try:
-            # Generate embeddings for questions
             query_embeddings = self._generate_embeddings(questions)
 
-            # Configure and perform vector search
             search_config = SearchConfiguration(num_neighbors=params.num_results)
             raw_results = self.vector_client.find_neighbors(
-                deployed_index_id=self.deployed_index_id,
+                deployed_index_id=DEPLOYED_INDEX_ID,
                 queries=query_embeddings,
                 config=search_config
             )

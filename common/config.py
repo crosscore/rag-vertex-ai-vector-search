@@ -4,13 +4,17 @@ A module that manages common settings for the RAG system.
 Basic settings such as project ID, region, and model name.
 """
 # Google Cloud Project settings
-PROJECT_ID = "business-test-001"
+PROJECT_ID = "990681154812"
 REGION = "asia-northeast1"
 
-# Vector Search settings
+# Vector Search Resource IDs
+INDEX_RESOURCE_ID = "6352696710313017344"
+ENDPOINT_RESOURCE_ID = "4314694733625556992"
+DEPLOYED_INDEX_ID = "table_metadata_index_deployed"
+
+# Vector Search Display Names (for human readability)
 INDEX_DISPLAY_NAME = "table_metadata_index"
 ENDPOINT_DISPLAY_NAME = "table_metadata_index_endpoint"
-DEPLOYED_INDEX_ID = "table_metadata_index_deployed"
 
 # Model settings
 EMBEDDING_MODEL = "text-multilingual-embedding-002"

@@ -14,12 +14,12 @@ app/
 │
 ├── rag/                        # RAG機能
 │   ├── init.py
-│   ├── search.py              # セマンティック検索メイン機能
+│   ├── search.py               # セマンティック検索メイン機能
 │   └── utils/
 │       ├── init.py
 │       └── result_formatter.py # 検索結果フォーマット機能
 │
-├── vector_store/              # Vector Store設定
+├── vector_store/               # Vector Store設定
 │   ├── init.py
 │   ├── setup_vector_search.py  # Vector Store設定実行
 │   └── utils/
